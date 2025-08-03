@@ -33,6 +33,11 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
+    // Link with CoreServices framework on macOS for FSEvents
+    if (target.query.os_tag == .macos or target.query.isNative() and @import("builtin").os.tag == .macos) {
+        exe.linkFramework("CoreServices");
+    }
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
