@@ -5,7 +5,7 @@ const Thread = std.Thread;
 
 const protocol = @import("protocol.zig");
 const file_manager = @import("file_manager.zig");
-const fsevents = @import("fsevents.zig");
+const FileWatcher = @import("file_watcher.zig").FileWatcher;
 
 const log = std.log.scoped(.rmate_server);
 
@@ -76,7 +76,7 @@ const FileSession = struct {
     real_path: []u8,
     temp_path: []u8,
     data_on_save: bool,
-    watcher: ?*fsevents.FileWatcher,
+    watcher: ?*FileWatcher,
     watcher_context: ?*WatcherContext,
     allocator: std.mem.Allocator,
 };
@@ -236,8 +236,8 @@ fn handleOpenCommand(session: *ClientSession, fm: *file_manager.FileManager, cmd
             .mutex = std.Thread.Mutex{},
         };
 
-        const watcher = try session.allocator.create(fsevents.FileWatcher);
-        watcher.* = try fsevents.FileWatcher.init(session.allocator, temp_path, fileChangedCallback, watcher_ctx);
+        const watcher = try session.allocator.create(FileWatcher);
+        watcher.* = try FileWatcher.init(session.allocator, temp_path, fileChangedCallback, watcher_ctx);
         try watcher.start();
 
         file_session.watcher = watcher;
