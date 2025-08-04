@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const version = std.SemanticVersion{ .major = 0, .minor = 7, .patch = 0, .pre = "dev" };
+
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
 // runner.
@@ -8,12 +10,21 @@ pub fn build(b: *std.Build) void {
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
     // for restricting supported target set are available.
-    const target = b.standardTargetOptions(.{});
+    const target = b.standardTargetOptions(.{
+        // For macOS, target older version for compatibility
+        .default_target = .{
+            .os_version_min = .{ .semver = .{ .major = 10, .minor = 15, .patch = 0 } },
+        },
+    });
 
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+
+    // Add build options
+    const build_options = b.addOptions();
+    build_options.addOption(std.SemanticVersion, "version", version);
 
     // We will also create a module for our other entry point, 'main.zig'.
     const exe_mod = b.createModule(.{
@@ -25,6 +36,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    exe_mod.addImport("build_options", build_options.createModule());
 
     // This creates another `std.Build.Step.Compile`, but this one builds an executable
     // rather than a static library.
