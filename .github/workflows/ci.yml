@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    name: Build and Test on ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        # The action will automatically detect the minimum Zig version from build.zig.zon
+        
+      - name: Build project
+        run: zig build
+        
+      - name: Run unit tests
+        run: zig build test
