@@ -240,3 +240,226 @@ pub const FileWatcher = struct {
         log.debug("inotify file watcher stopped for: {s}", .{self.path});
     }
 };
+
+// Test helpers
+const testing = std.testing;
+const expectEqual = testing.expectEqual;
+const expect = testing.expect;
+const expectEqualStrings = testing.expectEqualStrings;
+
+// Test context for callback verification
+const TestContext = struct {
+    calls: std.ArrayList([]const u8),
+    allocator: std.mem.Allocator,
+
+    fn init(allocator: std.mem.Allocator) TestContext {
+        return TestContext{
+            .calls = std.ArrayList([]const u8).init(allocator),
+            .allocator = allocator,
+        };
+    }
+
+    fn deinit(self: *TestContext) void {
+        for (self.calls.items) |call| {
+            self.allocator.free(call);
+        }
+        self.calls.deinit();
+    }
+
+    fn callback(ctx: *anyopaque, path: []const u8) void {
+        const self: *TestContext = @ptrCast(@alignCast(ctx));
+        const path_copy = self.allocator.dupe(u8, path) catch return;
+        self.calls.append(path_copy) catch return;
+    }
+};
+
+test "FileWatcher init and deinit" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_ctx = TestContext.init(allocator);
+    defer test_ctx.deinit();
+
+    const test_path = "/tmp/test_file.txt";
+    var watcher = try FileWatcher.init(allocator, test_path, TestContext.callback, &test_ctx);
+    defer watcher.deinit();
+
+    // Test that path is properly duplicated
+    try expectEqualStrings(test_path, watcher.path);
+
+    // Test that callback and context are set
+    try expect(watcher.callback == TestContext.callback);
+    try expect(@intFromPtr(watcher.callback_context) == @intFromPtr(&test_ctx));
+
+    // Test initial state
+    try expect(watcher.thread == null);
+    try expectEqual(false, watcher.should_stop.load(.seq_cst));
+}
+
+test "FileWatcher path memory management" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_ctx = TestContext.init(allocator);
+    defer test_ctx.deinit();
+
+    const test_path = "/tmp/test_file_memory.txt";
+    var watcher = try FileWatcher.init(allocator, test_path, TestContext.callback, &test_ctx);
+
+    // Verify the path is a different memory location (duplicated)
+    try expect(watcher.path.ptr != test_path.ptr);
+    try expectEqualStrings(test_path, watcher.path);
+
+    watcher.deinit();
+}
+
+test "FileWatcher stop without start" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_ctx = TestContext.init(allocator);
+    defer test_ctx.deinit();
+
+    const test_path = "/tmp/test_file_stop.txt";
+    var watcher = try FileWatcher.init(allocator, test_path, TestContext.callback, &test_ctx);
+    defer watcher.deinit();
+
+    // Should be safe to call stop without start
+    watcher.stop();
+    try expect(watcher.thread == null);
+}
+
+test "FileWatcher should_stop atomic operations" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_ctx = TestContext.init(allocator);
+    defer test_ctx.deinit();
+
+    const test_path = "/tmp/test_file_atomic.txt";
+    var watcher = try FileWatcher.init(allocator, test_path, TestContext.callback, &test_ctx);
+    defer watcher.deinit();
+
+    // Test initial state
+    try expectEqual(false, watcher.should_stop.load(.seq_cst));
+
+    // Test setting should_stop
+    watcher.should_stop.store(true, .seq_cst);
+    try expectEqual(true, watcher.should_stop.load(.seq_cst));
+
+    // Test resetting should_stop
+    watcher.should_stop.store(false, .seq_cst);
+    try expectEqual(false, watcher.should_stop.load(.seq_cst));
+}
+
+test "FileWatcher callback mechanism" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_ctx = TestContext.init(allocator);
+    defer test_ctx.deinit();
+
+    const test_path = "/tmp/test_file_callback.txt";
+    var watcher = try FileWatcher.init(allocator, test_path, TestContext.callback, &test_ctx);
+    defer watcher.deinit();
+
+    // Simulate callback invocation
+    watcher.callback(watcher.callback_context, watcher.path);
+
+    // Verify callback was called with correct path
+    try expectEqual(@as(usize, 1), test_ctx.calls.items.len);
+    try expectEqualStrings(test_path, test_ctx.calls.items[0]);
+}
+
+test "FileWatcher multiple callback invocations" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_ctx = TestContext.init(allocator);
+    defer test_ctx.deinit();
+
+    const test_path = "/tmp/test_file_multiple.txt";
+    var watcher = try FileWatcher.init(allocator, test_path, TestContext.callback, &test_ctx);
+    defer watcher.deinit();
+
+    // Simulate multiple callback invocations
+    watcher.callback(watcher.callback_context, watcher.path);
+    watcher.callback(watcher.callback_context, watcher.path);
+    watcher.callback(watcher.callback_context, watcher.path);
+
+    // Verify all callbacks were recorded
+    try expectEqual(@as(usize, 3), test_ctx.calls.items.len);
+    for (test_ctx.calls.items) |call| {
+        try expectEqualStrings(test_path, call);
+    }
+}
+
+test "FileWatcher platform-specific os_data initialization" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_ctx = TestContext.init(allocator);
+    defer test_ctx.deinit();
+
+    const test_path = "/tmp/test_file_platform.txt";
+    var watcher = try FileWatcher.init(allocator, test_path, TestContext.callback, &test_ctx);
+    defer watcher.deinit();
+
+    // Test that os_data is properly initialized based on platform
+    switch (target_os) {
+        .macos, .freebsd, .netbsd, .dragonfly, .openbsd => {
+            try expect(watcher.os_data == .kqueue);
+            try expect(watcher.os_data.kqueue.kq == null);
+            try expect(watcher.os_data.kqueue.file_fd == null);
+        },
+        .linux => {
+            try expect(watcher.os_data == .inotify);
+            try expect(watcher.os_data.inotify.inotify_fd == null);
+            try expect(watcher.os_data.inotify.watch_descriptor == null);
+        },
+        else => {
+            // This should not compile on unsupported platforms
+            try expect(false);
+        },
+    }
+}
+
+test "FileWatcher empty path handling" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_ctx = TestContext.init(allocator);
+    defer test_ctx.deinit();
+
+    const empty_path = "";
+    var watcher = try FileWatcher.init(allocator, empty_path, TestContext.callback, &test_ctx);
+    defer watcher.deinit();
+
+    try expectEqualStrings(empty_path, watcher.path);
+    try expectEqual(@as(usize, 0), watcher.path.len);
+}
+
+test "FileWatcher long path handling" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_ctx = TestContext.init(allocator);
+    defer test_ctx.deinit();
+
+    // Create a very long path
+    const long_path = "/very/long/path/to/some/deeply/nested/directory/structure/that/might/exist/on/some/filesystem/test_file.txt";
+    var watcher = try FileWatcher.init(allocator, long_path, TestContext.callback, &test_ctx);
+    defer watcher.deinit();
+
+    try expectEqualStrings(long_path, watcher.path);
+    try expectEqual(long_path.len, watcher.path.len);
+}

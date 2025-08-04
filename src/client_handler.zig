@@ -72,3 +72,139 @@ pub fn handleClient(session_manager: *session.SessionManager, stream: net.Stream
 
     log.debug("handleClient: All files closed, client handler exiting", .{});
 }
+
+// Unit tests
+const testing = std.testing;
+
+// Helper function to create a test configuration
+fn createTestConfig(allocator: std.mem.Allocator) !@import("config.zig").Config {
+    const editor = try allocator.dupe(u8, "test_editor");
+    const ip = try allocator.dupe(u8, "127.0.0.1");
+
+    return @import("config.zig").Config{
+        .default_editor = editor,
+        .port = 52698,
+        .ip = ip,
+    };
+}
+
+// Helper function to create a test session manager
+fn createTestSessionManager(allocator: std.mem.Allocator) !session.SessionManager {
+    const config = try createTestConfig(allocator);
+
+    return session.SessionManager{
+        .sessions = std.ArrayList(*session.ClientSession).init(allocator),
+        .mutex = std.Thread.Mutex{},
+        .allocator = allocator,
+        .config = config,
+    };
+}
+
+test "handleClientWrapper should catch and log errors" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Create a mock session manager
+    var session_manager = try createTestSessionManager(allocator);
+
+    // Create a test stream using a pipe
+    const fds = try std.posix.pipe();
+
+    // Close the write end to simulate an error when trying to read
+    std.posix.close(fds[1]);
+
+    const test_stream = net.Stream{ .handle = fds[0] };
+
+    // This should not panic, but should log an error
+    // handleClient will close the stream, so no need to defer close
+    handleClientWrapper(&session_manager, test_stream);
+
+    // If we reach here, the wrapper successfully caught the error
+    try testing.expect(true);
+}
+
+test "handleClient should handle unexpected save command" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Create a mock session manager
+    var session_manager = try createTestSessionManager(allocator);
+
+    // Create test data with unexpected save command
+    const test_protocol_data =
+        "save\n" ++
+        "token: test_token_123\n" ++
+        "data: 4\n" ++
+        "test\n" ++
+        "\n" ++
+        ".\n";
+
+    // Create a test stream using a pipe
+    const fds = try std.posix.pipe();
+
+    // Write test data to the pipe
+    _ = try std.posix.write(fds[1], test_protocol_data);
+    std.posix.close(fds[1]); // Close write end
+
+    const test_stream = net.Stream{ .handle = fds[0] };
+
+    // This should handle the unexpected save command and log a warning
+    // handleClient will close the stream
+    try handleClient(&session_manager, test_stream);
+}
+
+test "handleClient should handle unexpected close command" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Create a mock session manager
+    var session_manager = try createTestSessionManager(allocator);
+
+    // Create test data with unexpected close command
+    const test_protocol_data =
+        "close\n" ++
+        "token: test_token_123\n" ++
+        "\n" ++
+        ".\n";
+
+    // Create a test stream using a pipe
+    const fds = try std.posix.pipe();
+
+    // Write test data to the pipe
+    _ = try std.posix.write(fds[1], test_protocol_data);
+    std.posix.close(fds[1]); // Close write end
+
+    const test_stream = net.Stream{ .handle = fds[0] };
+
+    // This should handle the unexpected close command and log a warning
+    // handleClient will close the stream
+    try handleClient(&session_manager, test_stream);
+}
+
+test "handleClient should handle empty command stream" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Create a mock session manager
+    var session_manager = try createTestSessionManager(allocator);
+
+    // Create test data with just the end marker
+    const test_protocol_data = ".\n";
+
+    // Create a test stream using a pipe
+    const fds = try std.posix.pipe();
+
+    // Write test data to the pipe
+    _ = try std.posix.write(fds[1], test_protocol_data);
+    std.posix.close(fds[1]); // Close write end
+
+    const test_stream = net.Stream{ .handle = fds[0] };
+
+    // This should handle empty command stream gracefully
+    // handleClient will close the stream
+    try handleClient(&session_manager, test_stream);
+}
