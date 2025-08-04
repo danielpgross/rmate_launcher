@@ -1,0 +1,31 @@
+[Unit]
+Description=RMate Server - Remote file editing server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/rmate_server
+Restart=always
+RestartSec=5
+DynamicUser=true
+
+# Environment variables
+Environment=RMATE_EDITOR=code --wait
+Environment=RMATE_PORT=52698
+Environment=RMATE_IP=127.0.0.1
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rmate-server
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target
