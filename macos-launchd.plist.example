@@ -14,10 +14,11 @@
     <dict>
         <key>RMATE_EDITOR</key>
         <string>code --wait</string>
-        <key>RMATE_PORT</key>
-        <string>52698</string>
-        <key>RMATE_IP</key>
-        <string>127.0.0.1</string>
+        <!-- RMATE_SOCKET defaults to ~/.rmate-server/rmate.sock if not specified -->
+        <!-- 
+        <key>RMATE_SOCKET</key>
+        <string>/Users/USERNAME/.rmate-server/rmate.sock</string>
+        -->
     </dict>
     
     <key>RunAtLoad</key>
@@ -33,6 +34,23 @@
     <string>/usr/local/var/log/rmate-server-error.log</string>
     
     <key>WorkingDirectory</key>
-    <string>/tmp</string>
+    <string>/Users/USERNAME/.rmate-server</string>
+    
+    <!-- Note: Update USERNAME above to your actual username -->
+    
+    <!-- Uncomment the sandbox profile below for additional security -->
+    <!-- 
+    <key>SandboxProfile</key>
+    <string>
+        (version 1)
+        (deny default)
+        (allow process-exec (literal "/usr/local/bin/rmate_server"))
+        (allow file-read* file-write* (subpath "/Users/USERNAME/.rmate-server"))
+        (allow file-read* (subpath "/usr/bin") (subpath "/usr/local/bin"))
+        (allow file-read* (subpath "/Applications"))
+        (allow network-outbound (remote ip))
+        (allow network-bind (local ip))
+    </string>
+    -->
 </dict>
 </plist>

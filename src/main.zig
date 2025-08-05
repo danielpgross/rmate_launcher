@@ -21,15 +21,55 @@ pub fn main() !void {
     var session_manager = try session.SessionManager.init(allocator);
     defer session_manager.deinit();
 
-    // Setup TCP server
-    const address = try net.Address.parseIp(session_manager.config.ip, session_manager.config.port);
-    var listener = try address.listen(.{
-        .reuse_address = true,
-        .kernel_backlog = 128,
-    });
+    // Setup server (Unix socket or TCP)
+    var listener = if (session_manager.config.isUnixSocket()) blk: {
+        const socket_path = session_manager.config.socket_path.?;
+
+        // Remove existing socket file if it exists
+        std.fs.deleteFileAbsolute(socket_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+
+        // Ensure parent directory exists
+        if (std.fs.path.dirname(socket_path)) |dir| {
+            std.fs.makeDirAbsolute(dir) catch |err| switch (err) {
+                error.PathAlreadyExists => {},
+                else => return err,
+            };
+        }
+
+        const address = try net.Address.initUnix(socket_path);
+        const unix_listener = try address.listen(.{
+            .kernel_backlog = 128,
+        });
+
+        log.info("RMate server {} listening on Unix socket: {s}", .{ build_options.version, socket_path });
+        break :blk unix_listener;
+    } else blk: {
+        const ip = session_manager.config.ip.?;
+        const port = session_manager.config.port.?;
+        const address = try net.Address.parseIp(ip, port);
+        const tcp_listener = try address.listen(.{
+            .reuse_address = true,
+            .kernel_backlog = 128,
+        });
+
+        log.info("RMate server {} listening on TCP: {s}:{}", .{ build_options.version, ip, port });
+        break :blk tcp_listener;
+    };
     defer listener.deinit();
 
-    log.info("RMate server {} listening on {s}:{}", .{ build_options.version, session_manager.config.ip, session_manager.config.port });
+    // Setup cleanup for Unix socket
+    if (session_manager.config.isUnixSocket()) {
+        defer {
+            if (session_manager.config.socket_path) |socket_path| {
+                std.fs.deleteFileAbsolute(socket_path) catch |err| {
+                    log.warn("Failed to cleanup Unix socket {s}: {}", .{ socket_path, err });
+                };
+            }
+        }
+    }
 
     // Accept loop
     while (true) {

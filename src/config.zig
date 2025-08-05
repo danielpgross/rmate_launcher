@@ -4,8 +4,10 @@ const log = std.log.scoped(.rmate_config);
 
 pub const Config = struct {
     default_editor: []const u8,
-    port: u16,
-    ip: []const u8,
+    // Network configuration - either Unix socket or TCP
+    socket_path: ?[]const u8, // If present, use Unix socket
+    port: ?u16, // If socket_path is null, use TCP with these
+    ip: ?[]const u8, // If socket_path is null, use TCP with these
 
     pub fn init() !Config {
         const editor = std.process.getEnvVarOwned(std.heap.page_allocator, "RMATE_EDITOR") catch |err| switch (err) {
@@ -29,28 +31,71 @@ pub const Config = struct {
             }
         };
 
-        const ip = blk: {
-            if (std.process.getEnvVarOwned(std.heap.page_allocator, "RMATE_IP")) |ip_str| {
-                break :blk ip_str;
-            } else |err| switch (err) {
-                error.EnvironmentVariableNotFound => {
-                    const default_ip = try std.heap.page_allocator.dupe(u8, "127.0.0.1");
-                    break :blk default_ip;
-                },
+        // Check if user explicitly wants TCP mode by setting RMATE_IP or RMATE_PORT
+        const has_ip_config = if (std.process.getEnvVarOwned(std.heap.page_allocator, "RMATE_IP")) |ip_test| blk: {
+            std.heap.page_allocator.free(ip_test);
+            break :blk true;
+        } else |_| false;
+
+        const has_port_config = if (std.process.getEnvVarOwned(std.heap.page_allocator, "RMATE_PORT")) |port_test| blk: {
+            std.heap.page_allocator.free(port_test);
+            break :blk true;
+        } else |_| false;
+
+        const has_socket_config = if (std.process.getEnvVarOwned(std.heap.page_allocator, "RMATE_SOCKET")) |sock_test| blk: {
+            std.heap.page_allocator.free(sock_test);
+            break :blk true;
+        } else |_| false;
+
+        const use_tcp = (has_ip_config or has_port_config) and !has_socket_config;
+
+        const socket_path = if (!use_tcp) blk: {
+            break :blk std.process.getEnvVarOwned(std.heap.page_allocator, "RMATE_SOCKET") catch |err| switch (err) {
+                error.EnvironmentVariableNotFound => try getDefaultSocketPath(std.heap.page_allocator),
                 else => return err,
-            }
-        };
+            };
+        } else null;
+
+        const ip = if (use_tcp) blk: {
+            const ip_val = std.process.getEnvVarOwned(std.heap.page_allocator, "RMATE_IP") catch |err| switch (err) {
+                error.EnvironmentVariableNotFound => try std.heap.page_allocator.dupe(u8, "127.0.0.1"),
+                else => return err,
+            };
+            break :blk ip_val;
+        } else null;
+
+        if (socket_path) |path| {
+            log.info("Using Unix socket: {s}", .{path});
+        } else {
+            log.info("Using TCP socket: {s}:{}", .{ ip.?, port });
+        }
 
         return .{
             .default_editor = editor,
-            .port = port,
+            .socket_path = socket_path,
+            .port = if (use_tcp) port else null,
             .ip = ip,
         };
     }
 
     pub fn deinit(self: *Config) void {
         std.heap.page_allocator.free(self.default_editor);
-        std.heap.page_allocator.free(self.ip);
+        if (self.ip) |ip| {
+            std.heap.page_allocator.free(ip);
+        }
+        if (self.socket_path) |path| {
+            std.heap.page_allocator.free(path);
+        }
+    }
+
+    pub fn isUnixSocket(self: *const Config) bool {
+        return self.socket_path != null;
+    }
+
+    pub fn getDefaultSocketPath(allocator: std.mem.Allocator) ![]u8 {
+        const home = std.process.getEnvVarOwned(allocator, "HOME") catch return error.NoHomeDir;
+        defer allocator.free(home);
+        return std.fmt.allocPrint(allocator, "{s}/.rmate-server/rmate.sock", .{home});
     }
 
     pub fn getEditor(self: *const Config, hostname: []const u8, filepath: []const u8) []const u8 {
