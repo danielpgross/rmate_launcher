@@ -1,6 +1,6 @@
 # Release Instructions
 
-This document is for maintainers creating releases of rmate-server.
+This document is for maintainers creating releases of rmate_launcher.
 
 ## Creating a Release
 
@@ -65,10 +65,10 @@ git push origin main
 The release workflow produces:
 
 ### Artifacts Created
-- `rmate_server-linux-x86_64.tar.gz` + `.sha256`
-- `rmate_server-linux-aarch64.tar.gz` + `.sha256`  
-- `rmate_server-macos-x86_64.tar.gz` + `.sha256`
-- `rmate_server-macos-aarch64.tar.gz` + `.sha256`
+- `rmate_launcher-linux-x86_64.tar.gz` + `.sha256`
+- `rmate_launcher-linux-aarch64.tar.gz` + `.sha256`  
+- `rmate_launcher-macos-x86_64.tar.gz` + `.sha256`
+- `rmate_launcher-macos-aarch64.tar.gz` + `.sha256`
 
 ### Binary Characteristics
 - **Statically linked** - No runtime dependencies required
@@ -83,9 +83,9 @@ Ensure the version in `build.zig` matches your git tag:
 - build.zig: `1.0.0` (no `.pre = "dev"`) ✅
 
 The application displays this version in:
-- Startup log: `"RMate server 1.0.0 listening on..."`
-- Client greeting: `"RMate Server 1.0.0"`
-- Help output: `rmate_server --help` shows `"RMate Server 1.0.0"`
+- Startup log: `"RMate Launcher 1.0.0 listening on..."`
+- Client greeting: `"RMate Launcher 1.0.0"`
+- Help output: `rmate_launcher --help` shows `"RMate Launcher 1.0.0"`
 
 ## Testing Before Release
 

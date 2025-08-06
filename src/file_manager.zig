@@ -9,7 +9,7 @@ pub const FileManager = struct {
     pub fn init(allocator: std.mem.Allocator) !FileManager {
         const home = std.process.getEnvVarOwned(allocator, "HOME") catch return error.NoHomeDir;
         defer allocator.free(home);
-        const base_dir = try std.fmt.allocPrint(allocator, "{s}/.rmate-server", .{home});
+        const base_dir = try std.fmt.allocPrint(allocator, "{s}/.rmate_launcher", .{home});
 
         // Create base directory if it doesn't exist
         fs.makeDirAbsolute(base_dir) catch |err| switch (err) {
@@ -35,7 +35,7 @@ pub const FileManager = struct {
         const safe_filepath = try self.sanitizePath(filepath);
         defer self.allocator.free(safe_filepath);
 
-        // Create directory structure: ~/.rmate-server/hostname/
+        // Create directory structure: ~/.rmate_launcher/hostname/
         const host_dir = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.base_dir, safe_hostname });
         defer self.allocator.free(host_dir);
 
@@ -158,7 +158,7 @@ test "FileManager init and deinit" {
 
     // Verify base_dir is set correctly
     try testing.expect(fm.base_dir.len > 0);
-    try testing.expect(std.mem.endsWith(u8, fm.base_dir, ".rmate-server"));
+    try testing.expect(std.mem.endsWith(u8, fm.base_dir, ".rmate_launcher"));
 }
 
 test "FileManager sanitizePath basic functionality" {

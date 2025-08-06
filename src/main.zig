@@ -7,7 +7,7 @@ const session = @import("session.zig");
 const client_handler = @import("client_handler.zig");
 const cli = @import("cli.zig");
 
-const log = std.log.scoped(.rmate_server);
+const log = std.log.scoped(.rmate_launcher);
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -44,7 +44,7 @@ pub fn main() !void {
             .kernel_backlog = 128,
         });
 
-        log.info("RMate server {} listening on Unix socket: {s}", .{ build_options.version, socket_path });
+        log.info("RMate Launcher {} listening on Unix socket: {s}", .{ build_options.version, socket_path });
         break :blk unix_listener;
     } else blk: {
         const ip = session_manager.config.ip.?;
@@ -55,7 +55,7 @@ pub fn main() !void {
             .kernel_backlog = 128,
         });
 
-        log.info("RMate server {} listening on TCP: {s}:{}", .{ build_options.version, ip, port });
+        log.info("RMate Launcher {} listening on TCP: {s}:{}", .{ build_options.version, ip, port });
         break :blk tcp_listener;
     };
     defer listener.deinit();
@@ -77,7 +77,7 @@ pub fn main() !void {
             log.info("Client connected from {}", .{connection.address});
 
             // Send greeting
-            const version_string = try std.fmt.allocPrint(std.heap.page_allocator, "RMate Server {}\n", .{build_options.version});
+            const version_string = try std.fmt.allocPrint(std.heap.page_allocator, "RMate Launcher {}\n", .{build_options.version});
             defer std.heap.page_allocator.free(version_string);
             try connection.stream.writeAll(version_string);
 

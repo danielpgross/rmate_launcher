@@ -3,21 +3,21 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.user.rmate-server</string>
+    <string>com.user.rmate_launcher</string>
     
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/rmate_server</string>
+        <string>/usr/local/bin/rmate_launcher</string>
     </array>
     
     <key>EnvironmentVariables</key>
     <dict>
         <key>RMATE_EDITOR</key>
         <string>code --wait</string>
-        <!-- RMATE_SOCKET defaults to ~/.rmate-server/rmate.sock if not specified -->
+        <!-- RMATE_SOCKET defaults to ~/.rmate_launcher/rmate.sock if not specified -->
         <!-- 
         <key>RMATE_SOCKET</key>
-        <string>/Users/USERNAME/.rmate-server/rmate.sock</string>
+        <string>/Users/USERNAME/.rmate_launcher/rmate.sock</string>
         -->
     </dict>
     
@@ -28,13 +28,13 @@
     <true/>
     
     <key>StandardOutPath</key>
-    <string>/usr/local/var/log/rmate-server.log</string>
+    <string>/usr/local/var/log/rmate_launcher.log</string>
     
     <key>StandardErrorPath</key>
-    <string>/usr/local/var/log/rmate-server-error.log</string>
+    <string>/usr/local/var/log/rmate_launcher-error.log</string>
     
     <key>WorkingDirectory</key>
-    <string>/Users/USERNAME/.rmate-server</string>
+    <string>/Users/USERNAME/.rmate_launcher</string>
     
     <!-- Note: Update USERNAME above to your actual username -->
     
@@ -44,8 +44,8 @@
     <string>
         (version 1)
         (deny default)
-        (allow process-exec (literal "/usr/local/bin/rmate_server"))
-        (allow file-read* file-write* (subpath "/Users/USERNAME/.rmate-server"))
+        (allow process-exec (literal "/usr/local/bin/rmate_launcher"))
+        (allow file-read* file-write* (subpath "/Users/USERNAME/.rmate_launcher"))
         (allow file-read* (subpath "/usr/bin") (subpath "/usr/local/bin"))
         (allow file-read* (subpath "/Applications"))
         (allow network-outbound (remote ip))

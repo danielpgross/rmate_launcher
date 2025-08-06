@@ -95,7 +95,7 @@ pub const Config = struct {
     pub fn getDefaultSocketPath(allocator: std.mem.Allocator) ![]u8 {
         const home = std.process.getEnvVarOwned(allocator, "HOME") catch return error.NoHomeDir;
         defer allocator.free(home);
-        return std.fmt.allocPrint(allocator, "{s}/.rmate-server/rmate.sock", .{home});
+        return std.fmt.allocPrint(allocator, "{s}/.rmate_launcher/rmate.sock", .{home});
     }
 
     pub fn getEditor(self: *const Config, hostname: []const u8, filepath: []const u8) []const u8 {

@@ -4,12 +4,12 @@ const build_options = @import("build_options");
 pub fn printHelp() !void {
     const stdout = std.io.getStdOut().writer();
 
-    try stdout.print("RMate Server {}\n", .{build_options.version});
+    try stdout.print("RMate Launcher {}\n", .{build_options.version});
     try stdout.print("A server implementation of the RMate protocol that allows editing remote files\n", .{});
     try stdout.print("using a local editor of the user's choice.\n\n", .{});
 
     try stdout.print("USAGE:\n", .{});
-    try stdout.print("    rmate_server [OPTIONS]\n\n", .{});
+    try stdout.print("    rmate_launcher [OPTIONS]\n\n", .{});
 
     try stdout.print("OPTIONS:\n", .{});
     try stdout.print("    --help, -h    Show this help message and exit\n\n", .{});
@@ -22,7 +22,7 @@ pub fn printHelp() !void {
 
     try stdout.print("    RMATE_SOCKET  Unix socket path to listen on (RECOMMENDED - more secure)\n", .{});
     try stdout.print("                  If not set, falls back to TCP mode\n", .{});
-    try stdout.print("                  Example: export RMATE_SOCKET=~/.rmate-server/rmate.sock\n\n", .{});
+    try stdout.print("                  Example: export RMATE_SOCKET=~/.rmate_launcher/rmate.sock\n\n", .{});
 
     try stdout.print("    TCP MODE (less secure, legacy):\n", .{});
     try stdout.print("    RMATE_PORT    Port to listen on (default: 52698)\n", .{});
@@ -32,18 +32,18 @@ pub fn printHelp() !void {
 
     try stdout.print("HOW IT WORKS:\n", .{});
     try stdout.print("1. User opens remote file in SSH session using an RMate client\n", .{});
-    try stdout.print("2. Client connects through SSH tunnel (Unix socket or TCP) to RMate server\n", .{});
-    try stdout.print("3. RMate server saves file content to temporary file in ~/.rmate-server/\n", .{});
-    try stdout.print("4. RMate server begins watching for changes to tempfile using OS-level file watching\n", .{});
-    try stdout.print("5. RMate server spawns local editor process to edit the newly-created temporary file\n", .{});
-    try stdout.print("6. On changes to the temp file, RMate server sends 'save' command to client\n\n", .{});
+    try stdout.print("2. Client connects through SSH tunnel (Unix socket or TCP) to RMate Launcher\n", .{});
+    try stdout.print("3. RMate Launcher saves file content to temporary file in ~/.rmate_launcher/\n", .{});
+    try stdout.print("4. RMate Launcher begins watching for changes to tempfile using OS-level file watching\n", .{});
+    try stdout.print("5. RMate Launcher spawns local editor process to edit the newly-created temporary file\n", .{});
+    try stdout.print("6. On changes to the temp file, RMate Launcher sends 'save' command to client\n\n", .{});
 
-    try stdout.print("7. On close of the local editor process, RMate server sends 'close' command to client\n\n", .{});
+    try stdout.print("7. On close of the local editor process, RMate Launcher sends 'close' command to client\n\n", .{});
 
     try stdout.print("SECURITY:\n", .{});
     try stdout.print("- Uses Unix sockets by default (no network exposure)\n", .{});
-    try stdout.print("- All temp files restricted to ~/.rmate-server/ directory\n", .{});
-    try stdout.print("- SSH tunnel: ssh -R 52698:~/.rmate-server/rmate.sock user@host\n\n", .{});
+    try stdout.print("- All temp files restricted to ~/.rmate_launcher/ directory\n", .{});
+    try stdout.print("- SSH tunnel: ssh -R 52698:~/.rmate_launcher/rmate.sock user@host\n\n", .{});
 
     try stdout.print("The server supports multiple files opened concurrently.\n\n", .{});
 }

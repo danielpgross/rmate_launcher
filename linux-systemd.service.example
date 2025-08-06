@@ -1,29 +1,29 @@
 [Unit]
-Description=RMate Server - Remote file editing server
+Description=RMate Launcher - Remote file editing server
 After=network.target
 Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/rmate_server
+ExecStart=/usr/local/bin/rmate_launcher
 Restart=always
 RestartSec=5
 
 # Environment variables
 Environment=RMATE_EDITOR=code --wait
-# RMATE_SOCKET defaults to %h/.rmate-server/rmate.sock if not specified
-# Environment=RMATE_SOCKET=%h/.rmate-server/rmate.sock
+# RMATE_SOCKET defaults to %h/.rmate_launcher/rmate.sock if not specified
+# Environment=RMATE_SOCKET=%h/.rmate_launcher/rmate.sock
 
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=rmate-server
+SyslogIdentifier=rmate_launcher
 
 # Security settings
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=tmpfs
-ReadWritePaths=%h/.rmate-server
+ReadWritePaths=%h/.rmate_launcher
 ReadOnlyPaths=%h/.config %h/.local
 PrivateDevices=true
 ProtectKernelTunables=true

@@ -40,8 +40,8 @@ jobs:
       - name: Package binary
         run: |
           mkdir -p dist
-          binary_name="rmate_server-${{ matrix.os_name }}-${{ matrix.arch }}"
-          cp zig-out/bin/rmate_server "dist/${binary_name}"
+          binary_name="rmate_launcher-${{ matrix.os_name }}-${{ matrix.arch }}"
+          cp zig-out/bin/rmate_launcher "dist/${binary_name}"
           
           # Create tarball
           cd dist
@@ -54,5 +54,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/rmate_server-${{ matrix.os_name }}-${{ matrix.arch }}.tar.gz
-            dist/rmate_server-${{ matrix.os_name }}-${{ matrix.arch }}.tar.gz.sha256
+            dist/rmate_launcher-${{ matrix.os_name }}-${{ matrix.arch }}.tar.gz
+            dist/rmate_launcher-${{ matrix.os_name }}-${{ matrix.arch }}.tar.gz.sha256
