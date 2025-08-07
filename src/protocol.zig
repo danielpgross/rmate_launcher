@@ -69,9 +69,10 @@ pub const ProtocolParser = struct {
                 log.debug("readCommands: Parsing close command", .{});
                 const cmd = try self.parseCloseCommand();
                 try commands.append(.{ .close = cmd });
-            } else {
+            } else if (line.len > 0) {
                 log.warn("Unknown command: {s}", .{line});
             }
+            // Silently ignore empty lines
         }
 
         log.debug("readCommands: Finished reading {} commands", .{commands.items.len});
@@ -136,11 +137,8 @@ pub const ProtocolParser = struct {
                     log.debug("parseOpenCommand: Reading {} bytes of data", .{size});
                     cmd.data = try self.allocator.alloc(u8, size);
                     _ = try self.reader.readAll(cmd.data.?);
-                    // After reading data, we expect an empty line to end the command
-                    const empty_line = try self.readLine();
-                    log.debug("parseOpenCommand: After data, read line: '{s}'", .{empty_line});
-                    defer self.allocator.free(empty_line);
                     // The data section is always last, so break out of the parsing loop
+                    // Don't read an extra line - let the main parsing loop handle command termination
                     break;
                 }
             }
@@ -288,7 +286,7 @@ test "parse open command with all fields" {
     try input_data.appendSlice("file-type: json\n");
     try std.fmt.format(input_data.writer(), "data: {d}\n", .{data_content.len});
     try input_data.appendSlice(data_content);
-    try input_data.appendSlice("\n\n.\n");
+    try input_data.appendSlice("\n.\n");
 
     var stream = std.io.fixedBufferStream(input_data.items);
     var parser = ProtocolParser.init(allocator, stream.reader().any());
