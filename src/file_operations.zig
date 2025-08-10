@@ -11,15 +11,13 @@ const log = std.log.scoped(.rmate_file_ops);
 pub fn handleOpenCommand(client_session: *session.ClientSession, fm: *file_manager.FileManager, cmd: protocol.OpenCommand) !void {
     log.info("Opening file: {s}", .{cmd.display_name});
 
-    // Extract hostname from display_name (format: hostname:path)
+    // Extract hostname from display_name (format: hostname:...)
+    // Always mirror the actual remote path from real_path
     var hostname: []const u8 = "localhost";
-    var remote_path = cmd.real_path;
+    const remote_path = cmd.real_path;
 
     if (std.mem.indexOf(u8, cmd.display_name, ":")) |colon_idx| {
         hostname = cmd.display_name[0..colon_idx];
-        if (colon_idx + 1 < cmd.display_name.len) {
-            remote_path = cmd.display_name[colon_idx + 1 ..];
-        }
     }
 
     // Create temp file
@@ -132,23 +130,33 @@ fn editorThread(ctx: *session.EditorContext) !void {
         log.err("Failed to send close command: {}", .{err});
     };
 
-    // Remove file session
+    // Stop and cleanup resources BEFORE removing the session entry to avoid races
     var i: usize = 0;
     while (i < ctx.session.files.items.len) {
         if (std.mem.eql(u8, ctx.session.files.items[i].token, ctx.token)) {
-            const file_session = ctx.session.files.orderedRemove(i);
+            // Grab needed resources while the entry still exists
+            const temp_path = ctx.session.files.items[i].temp_path;
+            const watcher_ptr = ctx.session.files.items[i].watcher;
+            const watcher_ctx_ptr = ctx.session.files.items[i].watcher_context;
 
-            // Stop and cleanup watcher
-            if (file_session.watcher) |watcher| {
+            // Stop and cleanup watcher (joins background thread)
+            if (watcher_ptr) |watcher| {
                 watcher.deinit();
                 ctx.session.allocator.destroy(watcher);
+                ctx.session.files.items[i].watcher = null;
             }
 
             // Cleanup watcher context
-            if (file_session.watcher_context) |watcher_ctx| {
+            if (watcher_ctx_ptr) |watcher_ctx| {
                 ctx.session.allocator.destroy(watcher_ctx);
+                ctx.session.files.items[i].watcher_context = null;
             }
 
+            // Cleanup temp file and any empty parent directories
+            ctx.fm.cleanupTempPath(temp_path);
+
+            // Now remove the file session entry
+            _ = ctx.session.files.orderedRemove(i);
             break;
         }
         i += 1;

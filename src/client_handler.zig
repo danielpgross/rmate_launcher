@@ -29,7 +29,7 @@ pub fn handleClient(session_manager: *session.SessionManager, stream: net.Stream
     log.debug("handleClient: Session initialized", .{});
 
     // Create file manager
-    var fm = try file_manager.FileManager.init(allocator);
+    var fm = try file_manager.FileManager.init(allocator, null);
     defer fm.deinit();
 
     log.debug("handleClient: File manager initialized", .{});

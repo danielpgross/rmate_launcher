@@ -6,21 +6,25 @@ pub const FileManager = struct {
     allocator: std.mem.Allocator,
     base_dir: []u8,
 
-    pub fn init(allocator: std.mem.Allocator) !FileManager {
-        const home = std.process.getEnvVarOwned(allocator, "HOME") catch return error.NoHomeDir;
-        defer allocator.free(home);
-        const base_dir = try std.fmt.allocPrint(allocator, "{s}/.rmate_launcher", .{home});
+    pub fn init(allocator: std.mem.Allocator, maybe_base_dir: ?[]const u8) !FileManager {
+        var owned_path: ?[]u8 = null;
+        const base_path: []const u8 = if (maybe_base_dir) |base_dir_input| base_dir_input else blk: {
+            const home = std.process.getEnvVarOwned(allocator, "HOME") catch return error.NoHomeDir;
+            defer allocator.free(home);
+            owned_path = try std.fmt.allocPrint(allocator, "{s}/.rmate_launcher", .{home});
+            break :blk owned_path.?;
+        };
 
-        // Create base directory if it doesn't exist
-        fs.makeDirAbsolute(base_dir) catch |err| switch (err) {
+        // Ensure base directory exists once
+        fs.makeDirAbsolute(base_path) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return err,
         };
 
-        return .{
-            .allocator = allocator,
-            .base_dir = base_dir,
-        };
+        // Transfer ownership if we allocated, otherwise dupe the provided slice
+        const base_dir: []u8 = if (owned_path) |p| p else try allocator.dupe(u8, base_path);
+
+        return .{ .allocator = allocator, .base_dir = base_dir };
     }
 
     pub fn deinit(self: *FileManager) void {
@@ -28,32 +32,31 @@ pub const FileManager = struct {
     }
 
     pub fn createTempFile(self: *FileManager, hostname: []const u8, filepath: []const u8) ![]u8 {
-        // Sanitize hostname and filepath
-        const safe_hostname = try self.sanitizePath(hostname);
+        // Sanitize hostname and path to mirror remote directory structure safely
+        const safe_hostname = try self.sanitizeHostname(hostname);
         defer self.allocator.free(safe_hostname);
 
-        const safe_filepath = try self.sanitizePath(filepath);
-        defer self.allocator.free(safe_filepath);
+        const mirrored_rel_path = try self.sanitizePath(filepath);
+        defer self.allocator.free(mirrored_rel_path);
 
-        // Create directory structure: ~/.rmate_launcher/hostname/
-        const host_dir = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.base_dir, safe_hostname });
-        defer self.allocator.free(host_dir);
+        // Ensure parent directories exist under base_dir using std.fs.Dir.makePath
+        var base = try fs.openDirAbsolute(self.base_dir, .{});
+        defer base.close();
 
-        fs.makeDirAbsolute(host_dir) catch |err| switch (err) {
+        // Ensure host directory exists
+        base.makePath(safe_hostname) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return err,
         };
 
-        // Create temp file path
-        const temp_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}/{s}", .{ self.base_dir, safe_hostname, safe_filepath });
-
-        // Ensure parent directories exist
-        if (fs.path.dirname(temp_path)) |dir| {
-            fs.makeDirAbsolute(dir) catch |err| switch (err) {
-                error.PathAlreadyExists => {},
-                else => return err,
-            };
+        if (fs.path.dirname(mirrored_rel_path)) |rel_parent| {
+            const full_rel_parent = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ safe_hostname, rel_parent });
+            defer self.allocator.free(full_rel_parent);
+            try base.makePath(full_rel_parent);
         }
+
+        // Create temp file path, preserving the mirrored directory structure under the hostname
+        const temp_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}/{s}", .{ self.base_dir, safe_hostname, mirrored_rel_path });
 
         return temp_path;
     }
@@ -76,36 +79,71 @@ pub const FileManager = struct {
         return contents;
     }
 
-    fn sanitizePath(self: *FileManager, path: []const u8) ![]u8 {
-        var result = try self.allocator.alloc(u8, path.len);
-        var i: usize = 0;
-        var prev_was_dot = false;
-
-        for (path) |c| {
-            switch (c) {
-                '/' => {
-                    result[i] = '_';
-                    i += 1;
-                    prev_was_dot = false;
-                },
-                '.' => {
-                    if (prev_was_dot) {
-                        // Skip double dots
-                        continue;
-                    }
-                    result[i] = c;
-                    i += 1;
-                    prev_was_dot = true;
-                },
-                else => {
-                    result[i] = c;
-                    i += 1;
-                    prev_was_dot = false;
-                },
-            }
+    pub fn cleanupTempPath(self: *FileManager, temp_path: []const u8) void {
+        // Safety: only operate within base_dir
+        const under_base =
+            std.mem.startsWith(u8, temp_path, self.base_dir) and
+            (temp_path.len == self.base_dir.len or temp_path[self.base_dir.len] == '/');
+        if (!under_base) {
+            log.warn("Refusing to cleanup outside base dir: {s}", .{temp_path});
+            return;
         }
 
+        // Delete the file; ignore if it is already gone
+        std.fs.deleteFileAbsolute(temp_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => log.warn("Failed to delete temp file {s}: {}", .{ temp_path, err }),
+        };
+
+        // Prune empty parent directories up to (but not including) base_dir
+        var parent_opt = std.fs.path.dirname(temp_path);
+        while (parent_opt) |parent| {
+            if (parent.len <= self.base_dir.len) break;
+            if (!std.mem.startsWith(u8, parent, self.base_dir)) break;
+
+            std.fs.deleteDirAbsolute(parent) catch |err| switch (err) {
+                error.DirNotEmpty => break,
+                error.FileNotFound => {},
+                else => break,
+            };
+
+            parent_opt = std.fs.path.dirname(parent);
+        }
+    }
+
+    fn sanitizeHostname(self: *FileManager, hostname: []const u8) ![]u8 {
+        // Allow only hostname-safe characters: A-Z a-z 0-9 . - _ ; replace others with '_'
+        var result = try self.allocator.alloc(u8, hostname.len);
+        var i: usize = 0;
+        for (hostname) |c| {
+            const is_alpha = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z');
+            const is_digit = (c >= '0' and c <= '9');
+            const is_ok = is_alpha or is_digit or c == '.' or c == '-' or c == '_';
+            result[i] = if (is_ok) c else '_';
+            i += 1;
+        }
         return try self.allocator.realloc(result, i);
+    }
+
+    fn sanitizePath(self: *FileManager, path: []const u8) ![]u8 {
+        // Ignore invalid traversal components completely, and collapse '.' and empty components.
+        // Always produce a relative path to be placed under hostname.
+        var out = std.ArrayList(u8).init(self.allocator);
+        defer out.deinit();
+
+        var it = std.mem.splitScalar(u8, path, '/');
+        var first = true;
+        while (it.next()) |seg| {
+            if (seg.len == 0) continue; // skip empty and leading '/'
+            if (std.mem.eql(u8, seg, ".")) continue; // skip current dir
+            if (std.mem.eql(u8, seg, "..")) continue; // ignore parent traversal entirely
+
+            if (!first) try out.append('/');
+            try out.appendSlice(seg);
+            first = false;
+        }
+
+        return try out.toOwnedSlice();
     }
 };
 
@@ -152,90 +190,132 @@ const testing = std.testing;
 const test_allocator = testing.allocator;
 
 test "FileManager init and deinit" {
-    // Test basic initialization and cleanup
-    var fm = try FileManager.init(test_allocator);
+    // Test basic initialization and cleanup using a temp base dir
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
     defer fm.deinit();
 
     // Verify base_dir is set correctly
-    try testing.expect(fm.base_dir.len > 0);
-    try testing.expect(std.mem.endsWith(u8, fm.base_dir, ".rmate_launcher"));
+    try testing.expectEqualStrings(base_under_tmp, fm.base_dir);
 }
 
-test "FileManager sanitizePath basic functionality" {
-    var fm = try FileManager.init(test_allocator);
+test "FileManager sanitizeHostname basic functionality" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
     defer fm.deinit();
 
     // Test basic path sanitization
-    const result1 = try fm.sanitizePath("simple");
+    const result1 = try fm.sanitizeHostname("simple");
     defer test_allocator.free(result1);
     try testing.expectEqualStrings("simple", result1);
 
     // Test forward slash replacement
-    const result2 = try fm.sanitizePath("path/with/slashes");
+    const result2 = try fm.sanitizeHostname("path/with/slashes");
     defer test_allocator.free(result2);
     try testing.expectEqualStrings("path_with_slashes", result2);
 
     // Test double dot removal
-    const result3 = try fm.sanitizePath("path..with..dots");
+    const result3 = try fm.sanitizeHostname("path..with..dots");
     defer test_allocator.free(result3);
     try testing.expectEqualStrings("path.with.dots", result3);
 
     // Test complex path
-    const result4 = try fm.sanitizePath("/etc/../config/file.txt");
+    const result4 = try fm.sanitizeHostname("/etc/../config/file.txt");
     defer test_allocator.free(result4);
     try testing.expectEqualStrings("_etc_._config_file.txt", result4);
 }
 
-test "FileManager sanitizePath edge cases" {
-    var fm = try FileManager.init(test_allocator);
+test "FileManager sanitizeHostname edge cases" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
     defer fm.deinit();
 
     // Test empty string
-    const result1 = try fm.sanitizePath("");
+    const result1 = try fm.sanitizeHostname("");
     defer test_allocator.free(result1);
     try testing.expectEqualStrings("", result1);
 
     // Test single character
-    const result2 = try fm.sanitizePath("/");
+    const result2 = try fm.sanitizeHostname("/");
     defer test_allocator.free(result2);
     try testing.expectEqualStrings("_", result2);
 
     // Test only dots
-    const result3 = try fm.sanitizePath("...");
+    const result3 = try fm.sanitizeHostname("...");
     defer test_allocator.free(result3);
     try testing.expectEqualStrings(".", result3);
 }
 
 test "FileManager createTempFile path structure" {
-    var fm = try FileManager.init(test_allocator);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
     defer fm.deinit();
 
     // Test temp file path creation
     const temp_path = try fm.createTempFile("server1", "/etc/hosts");
     defer test_allocator.free(temp_path);
 
-    // Verify path structure: base_dir/hostname/filepath
+    // Verify path structure: base_dir/hostname/etc/hosts
     try testing.expect(std.mem.indexOf(u8, temp_path, fm.base_dir) == 0);
     try testing.expect(std.mem.indexOf(u8, temp_path, "server1") != null);
-    try testing.expect(std.mem.indexOf(u8, temp_path, "_etc_hosts") != null);
+    try testing.expect(std.mem.indexOf(u8, temp_path, "etc/hosts") != null);
 }
 
 test "FileManager createTempFile with special characters" {
-    var fm = try FileManager.init(test_allocator);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
     defer fm.deinit();
 
     // Test with hostname and filepath containing special characters
     const temp_path = try fm.createTempFile("my-server.example.com", "/var/../log/app.log");
     defer test_allocator.free(temp_path);
 
-    // Verify sanitization occurred
+    // Verify normalization occurred and mirrored path is preserved
     try testing.expect(std.mem.indexOf(u8, temp_path, "my-server.example.com") != null);
-    try testing.expect(std.mem.indexOf(u8, temp_path, "_var_._log_app.log") != null);
+    try testing.expect(std.mem.indexOf(u8, temp_path, "var/log/app.log") != null);
     try testing.expect(std.mem.indexOf(u8, temp_path, "..") == null);
 }
 
 test "FileManager write and read temp file" {
-    var fm = try FileManager.init(test_allocator);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
     defer fm.deinit();
 
     // Create a temp file path
@@ -260,7 +340,14 @@ test "FileManager write and read temp file" {
 }
 
 test "FileManager write and read empty file" {
-    var fm = try FileManager.init(test_allocator);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
     defer fm.deinit();
 
     // Create a temp file path
@@ -282,7 +369,14 @@ test "FileManager write and read empty file" {
 }
 
 test "FileManager write and read large file" {
-    var fm = try FileManager.init(test_allocator);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
     defer fm.deinit();
 
     // Create a temp file path
@@ -318,8 +412,90 @@ test "EditorSpawner init" {
     try testing.expect(spawner.allocator.ptr == test_allocator.ptr);
 }
 
+test "FileManager cleanupTempPath deletes file and prunes empty dirs" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
+    defer fm.deinit();
+
+    const host = "cleanuphost1";
+    const temp_path = try fm.createTempFile(host, "/a/b/c/file.txt");
+    defer test_allocator.free(temp_path);
+
+    try fm.writeTempFile(temp_path, "data");
+
+    // Perform cleanup
+    fm.cleanupTempPath(temp_path);
+
+    // The file should be gone
+    try testing.expectError(error.FileNotFound, fs.openFileAbsolute(temp_path, .{}));
+
+    // The host directory should be pruned (since no siblings)
+    const host_dir = try std.fmt.allocPrint(test_allocator, "{s}/{s}", .{ fm.base_dir, host });
+    defer test_allocator.free(host_dir);
+    try testing.expectError(error.FileNotFound, fs.openDirAbsolute(host_dir, .{}));
+}
+
+test "FileManager cleanupTempPath preserves non-empty dirs until all files removed" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
+    defer fm.deinit();
+
+    const host = "cleanuphost2";
+    const path1 = try fm.createTempFile(host, "/a/b/c/file1.txt");
+    defer test_allocator.free(path1);
+    const path2 = try fm.createTempFile(host, "/a/b/c/file2.txt");
+    defer test_allocator.free(path2);
+
+    try fm.writeTempFile(path1, "data1");
+    try fm.writeTempFile(path2, "data2");
+
+    // Cleanup first file only
+    fm.cleanupTempPath(path1);
+
+    // file1 should be gone
+    try testing.expectError(error.FileNotFound, fs.openFileAbsolute(path1, .{}));
+
+    // Directory should still exist because file2 remains
+    const dir_c = (std.fs.path.dirname(path1) orelse return error.Unexpected);
+    var dir_handle = try fs.openDirAbsolute(dir_c, .{});
+    dir_handle.close();
+
+    // file2 should still exist
+    var f2 = try fs.openFileAbsolute(path2, .{});
+    f2.close();
+
+    // Now cleanup second file; this should prune directories as they become empty
+    fm.cleanupTempPath(path2);
+
+    // Host directory should now be gone
+    const host_dir = try std.fmt.allocPrint(test_allocator, "{s}/{s}", .{ fm.base_dir, host });
+    defer test_allocator.free(host_dir);
+    try testing.expectError(error.FileNotFound, fs.openDirAbsolute(host_dir, .{}));
+}
+
 test "FileManager readTempFile nonexistent file" {
-    var fm = try FileManager.init(test_allocator);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
     defer fm.deinit();
 
     // Try to read a nonexistent file
@@ -328,16 +504,23 @@ test "FileManager readTempFile nonexistent file" {
 }
 
 test "FileManager createTempFile nested directories" {
-    var fm = try FileManager.init(test_allocator);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = tmp.dir.realpathAlloc(test_allocator, ".") catch unreachable;
+    defer test_allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(test_allocator, "{s}/rmate-test", .{tmp_root});
+    defer test_allocator.free(base_under_tmp);
+
+    var fm = try FileManager.init(test_allocator, base_under_tmp);
     defer fm.deinit();
 
     // Test creating nested directory structure
     const temp_path = try fm.createTempFile("deephost", "/very/deep/nested/path/file.txt");
     defer test_allocator.free(temp_path);
 
-    // Verify the path structure includes nested elements
+    // Verify the path structure mirrors nested elements
     try testing.expect(std.mem.indexOf(u8, temp_path, "deephost") != null);
-    try testing.expect(std.mem.indexOf(u8, temp_path, "_very_deep_nested_path_file.txt") != null);
+    try testing.expect(std.mem.indexOf(u8, temp_path, "very/deep/nested/path/file.txt") != null);
 
     // Test that we can actually write to this nested path
     const test_data = "nested file content";
