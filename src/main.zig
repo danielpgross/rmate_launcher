@@ -6,8 +6,78 @@ const build_options = @import("build_options");
 const session = @import("session.zig");
 const client_handler = @import("client_handler.zig");
 const cli = @import("cli.zig");
+const posix = std.posix;
+const atomic = std.atomic;
+const builtin = @import("builtin");
 
 const log = std.log.scoped(.rmate_launcher);
+
+var shutdown_requested: atomic.Value(bool) = atomic.Value(bool).init(false);
+
+fn handleSignal(sig: c_int) callconv(.C) void {
+    _ = sig;
+    shutdown_requested.store(true, .release);
+}
+
+fn acceptInterruptible(server: *net.Server) (error{Interrupted} || posix.AcceptError)!net.Server.Connection {
+    var accepted_addr: net.Address = undefined;
+    var addr_len: posix.socklen_t = @sizeOf(net.Address);
+
+    const fd: posix.socket_t = blk: {
+        const have_accept4 = !(builtin.target.os.tag.isDarwin() or builtin.target.os.tag == .windows or builtin.target.os.tag == .haiku);
+        if (have_accept4) {
+            const rc = posix.system.accept4(server.stream.handle, &accepted_addr.any, &addr_len, posix.SOCK.CLOEXEC);
+            switch (posix.errno(rc)) {
+                .SUCCESS => break :blk @as(posix.socket_t, @intCast(rc)),
+                .INTR => return error.Interrupted,
+                .AGAIN => return error.WouldBlock,
+                .BADF => unreachable,
+                .CONNABORTED => return error.ConnectionAborted,
+                .FAULT => unreachable,
+                .INVAL => return error.SocketNotListening,
+                .NOTSOCK => unreachable,
+                .MFILE => return error.ProcessFdQuotaExceeded,
+                .NFILE => return error.SystemFdQuotaExceeded,
+                .NOBUFS, .NOMEM => return error.SystemResources,
+                .OPNOTSUPP => unreachable,
+                .PROTO => return error.ProtocolFailure,
+                .PERM => return error.BlockedByFirewall,
+                else => |err| return posix.unexpectedErrno(err),
+            }
+        } else {
+            const rc = posix.system.accept(server.stream.handle, &accepted_addr.any, &addr_len);
+            switch (posix.errno(rc)) {
+                .SUCCESS => {
+                    const new_fd: posix.socket_t = @intCast(rc);
+                    // Ensure CLOEXEC on the accepted fd (best-effort on platforms without accept4)
+                    if (posix.fcntl(new_fd, posix.F.GETFD, 0)) |current| {
+                        _ = posix.fcntl(new_fd, posix.F.SETFD, @as(usize, @intCast(current | posix.FD_CLOEXEC))) catch {};
+                    } else |_| {}
+                    break :blk new_fd;
+                },
+                .INTR => return error.Interrupted,
+                .AGAIN => return error.WouldBlock,
+                .BADF => unreachable,
+                .CONNABORTED => return error.ConnectionAborted,
+                .FAULT => unreachable,
+                .INVAL => return error.SocketNotListening,
+                .NOTSOCK => unreachable,
+                .MFILE => return error.ProcessFdQuotaExceeded,
+                .NFILE => return error.SystemFdQuotaExceeded,
+                .NOBUFS, .NOMEM => return error.SystemResources,
+                .OPNOTSUPP => unreachable,
+                .PROTO => return error.ProtocolFailure,
+                .PERM => return error.BlockedByFirewall,
+                else => |err| return posix.unexpectedErrno(err),
+            }
+        }
+    };
+
+    return .{
+        .stream = .{ .handle = fd },
+        .address = accepted_addr,
+    };
+}
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -60,6 +130,17 @@ pub fn main() !void {
     };
     defer listener.deinit();
 
+    // Register signal handlers for graceful shutdown
+    {
+        var sa = posix.Sigaction{
+            .handler = .{ .handler = handleSignal },
+            .mask = posix.empty_sigset,
+            .flags = 0,
+        };
+        posix.sigaction(posix.SIG.INT, &sa, null);
+        posix.sigaction(posix.SIG.TERM, &sa, null);
+    }
+
     // Setup cleanup for Unix socket
     if (session_manager.config.isUnixSocket()) {
         defer {
@@ -71,9 +152,9 @@ pub fn main() !void {
         }
     }
 
-    // Accept loop
+    // Accept loop (blocking). Our wrapper returns Interrupted on signal.
     while (true) {
-        if (listener.accept()) |connection| {
+        if (acceptInterruptible(&listener)) |connection| {
             log.info("Client connected from {}", .{connection.address});
 
             // Send greeting
@@ -91,8 +172,17 @@ pub fn main() !void {
                 continue;
             };
             thread.detach();
-        } else |err| {
-            log.err("Failed to accept connection: {}", .{err});
+        } else |err| switch (err) {
+            error.Interrupted => {
+                if (shutdown_requested.load(.acquire)) break;
+                continue;
+            },
+            error.ConnectionAborted => continue,
+            else => {
+                log.err("Failed to accept connection: {}", .{err});
+                continue;
+            },
         }
     }
+    log.info("Shutdown requested; exiting accept loop", .{});
 }
