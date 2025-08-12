@@ -1,0 +1,41 @@
+A server implementation of the RMate protocol that allows editing remote files
+using a local editor of the user's choice.
+
+USAGE:
+    rmate_launcher [OPTIONS]
+
+OPTIONS:
+    --help, -h    Show this help message and exit
+
+ENVIRONMENT VARIABLES:
+    RMATE_EDITOR  Editor command to use (REQUIRED)
+                  The command will receive the temp file path as an argument
+                  Example: export RMATE_EDITOR="code --wait"
+                  Example: export RMATE_EDITOR="vim"
+
+    RMATE_SOCKET  Unix socket path to listen on (RECOMMENDED - more secure)
+                  If not set, falls back to TCP mode
+                  Example: export RMATE_SOCKET=~/.rmate_launcher/rmate.sock
+
+    TCP MODE (less secure, legacy):
+    RMATE_PORT    Port to listen on (default: 52698)
+                  Example: export RMATE_PORT=52699
+    RMATE_IP      IP address to bind to (default: 127.0.0.1)
+                  Example: export RMATE_IP=0.0.0.0
+
+HOW IT WORKS:
+1. User opens remote file in SSH session using an RMate client
+2. Client connects through SSH tunnel (Unix socket or TCP) to RMate Launcher
+3. RMate Launcher saves file content to temporary file in ~/.rmate_launcher/
+4. RMate Launcher begins watching for changes to tempfile using OS-level file watching
+5. RMate Launcher spawns local editor process to edit the newly-created temporary file
+6. On changes to the temp file, RMate Launcher sends 'save' command to client
+7. On close of the local editor process, RMate Launcher sends 'close' command to client
+
+SECURITY:
+- Uses Unix sockets by default (no network exposure)
+- All temp files restricted to ~/.rmate_launcher/ directory
+- SSH tunnel: ssh -R 52698:~/.rmate_launcher/rmate.sock user@host
+
+The server supports multiple files opened concurrently.
+
