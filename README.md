@@ -14,7 +14,7 @@ Seamlessly edit files over SSH with a local editor of your choice, using the rma
 
 1. RMate client on remote server connects via SSH tunnel to local RMate Launcher
 2. Server saves file content to temp file and watches for changes with OS-level notifications
-  - Temp files mirror the remote path under a per-host directory: `~/.rmate_launcher/<hostname>/<remote path>` (e.g., `hostname:/etc/foo/bar.txt` -> `~/.rmate_launcher/hostname/etc/foo/bar.txt`).
+    - Temp files mirror the remote path under a per-host directory: `~/.rmate_launcher/<hostname>/<remote path>` (e.g., `hostname:/etc/foo/bar.txt` -> `~/.rmate_launcher/hostname/etc/foo/bar.txt`).
 3. Server spawns local editor to edit temp file
 4. Changes trigger `save` commands; editor close triggers `close` command
 
@@ -123,9 +123,7 @@ export RMATE_EDITOR="subl --wait"    # Sublime Text
 
 ### Advanced: Dynamic editor selection
 
-Since `RMATE_EDITOR` can be any command, you can use a bash script to launch different editors based on file patterns:
-
-Note: the script receives the mirrored temp path (e.g., `~/.rmate_launcher/<hostname>/...`), so you can route by hostname, remote path, or file extension.
+Since `RMATE_EDITOR` can be any command, you can use a bash script to launch different editors based on file patterns. The script receives the mirrored temp path (e.g., `~/.rmate_launcher/<hostname>/...`), so you can route by hostname, remote path, or file extension:
 
 ```bash
 #!/bin/bash
