@@ -40,7 +40,7 @@ ssh -R 52698:~/.rmate_launcher/rmate.sock user@remote-server
 rmate /path/to/remote/file.txt
 ```
 
-### Automatic SSH Config
+### Optional: Automatic SSH Config
 
 Add to `~/.ssh/config` for automatic forwarding:
 ```ssh-config
@@ -49,6 +49,29 @@ Host myserver.example.com          # For specific hosts
 
 Host *                            # For all hosts (optional)
     RemoteForward 52698 ~/.rmate_launcher/rmate.sock
+```
+
+### Optional: Set `rmate` as the default editor on the remote
+
+On the remote host (after you have `rmate` installed and executable, and your SSH session is forwarding as shown above):
+
+```bash
+echo 'export VISUAL="rmate -w"' >> ~/.zshrc
+echo 'export EDITOR="$VISUAL"' >> ~/.zshrc
+. ~/.zshrc
+```
+
+#### Edit root-owned files safely (sudoedit)
+
+Use `sudoedit` (aka `sudo -e`) so your editor runs unprivileged while sudo writes back with root permissions.
+
+```bash
+echo 'export SUDO_EDITOR="rmate -w"' >> ~/.zshrc
+. ~/.zshrc
+
+sudoedit /etc/ssh/sshd_config   # or: sudo -e /etc/hosts
+
+sudo EDITOR="rmate -w" visudo
 ```
 
 ## Installation
