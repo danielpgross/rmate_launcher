@@ -142,13 +142,12 @@ pub fn main() !void {
     }
 
     // Setup cleanup for Unix socket
-    if (session_manager.config.isUnixSocket()) {
-        defer {
-            if (session_manager.config.socket_path) |socket_path| {
-                std.fs.deleteFileAbsolute(socket_path) catch |err| {
-                    log.warn("Failed to cleanup Unix socket {s}: {}", .{ socket_path, err });
-                };
-            }
+    const cleanup_socket_path = session_manager.config.socket_path;
+    defer {
+        if (cleanup_socket_path) |socket_path| {
+            std.fs.deleteFileAbsolute(socket_path) catch |err| {
+                log.warn("Failed to cleanup Unix socket {s}: {}", .{ socket_path, err });
+            };
         }
     }
 
