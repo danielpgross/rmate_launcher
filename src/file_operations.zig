@@ -23,13 +23,22 @@ pub fn handleOpenCommand(client_session: *session.ClientSession, fm: *file_manag
     // Create temp file
     const temp_path = try fm.createTempFile(hostname, remote_path);
 
-    // Write initial content if provided
-    if (cmd.data) |data| {
-        try fm.writeTempFile(temp_path, data);
-    } else {
-        // Create empty file
-        try fm.writeTempFile(temp_path, "");
-    }
+    // Determine initial content and write once with shared error handling
+    const write_data: []const u8 = if (cmd.data) |d| d else "";
+    fm.writeTempFile(temp_path, write_data) catch |err| switch (err) {
+        error.PathAlreadyExists => {
+            // Another session already created this temp file; close this token immediately
+            const writer = client_session.stream.writer().any();
+            var proto_writer = protocol.ProtocolWriter.init(writer);
+            proto_writer.writeCloseCommand(cmd.token) catch |write_err| {
+                log.err("Failed to send close command: {}", .{write_err});
+            };
+            // Free allocated temp_path since we won't track a session for it
+            fm.allocator.free(temp_path);
+            return;
+        },
+        else => return err,
+    };
 
     // Create file session
     var file_session = session.FileSession{
@@ -163,4 +172,91 @@ fn editorThread(ctx: *session.EditorContext) !void {
     }
 
     log.info("Editor closed for file: {s}", .{ctx.token});
+}
+
+// Unit test: duplicate open triggers immediate close
+test "handleOpenCommand closes duplicate opens by sending close command" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const posix = std.posix;
+    const net = std.net;
+
+    // Set up a temporary base directory for FileManager
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tmp_root = tmp.dir.realpathAlloc(allocator, ".") catch unreachable;
+    defer allocator.free(tmp_root);
+    const base_under_tmp = try std.fmt.allocPrint(allocator, "{s}/rmate-test", .{tmp_root});
+    defer allocator.free(base_under_tmp);
+
+    var fm = try file_manager.FileManager.init(allocator, base_under_tmp);
+    defer fm.deinit();
+
+    // Pre-create the temp file to force PathAlreadyExists on write
+    const host = "testhost";
+    const real_path = "/dup/file.txt";
+    const temp_path = try fm.createTempFile(host, real_path);
+    defer allocator.free(temp_path);
+    try fm.writeTempFile(temp_path, "first");
+
+    // Create a pipe to capture protocol output
+    var fds: [2]posix.fd_t = undefined;
+    try posix.pipe(&fds);
+    defer {
+        posix.close(fds[0]);
+        posix.close(fds[1]);
+    }
+
+    // Build a ClientSession with the write end of the pipe
+    var cfg = @import("config.zig").Config{
+        .default_editor = "true",
+        .socket_path = null,
+        .port = null,
+        .ip = null,
+    };
+    const stream = net.Stream{ .handle = @as(posix.socket_t, @intCast(fds[1])) };
+    const client = session.ClientSession.init(stream, allocator, &cfg);
+    defer client.deinit();
+
+    // Prepare an open command for the same file/path
+    const open_cmd = protocol.OpenCommand{
+        .display_name = try allocator.dupe(u8, "testhost:/dup/file.txt"),
+        .real_path = try allocator.dupe(u8, real_path),
+        .data_on_save = false,
+        .re_activate = false,
+        .token = try allocator.dupe(u8, "tok"),
+        .selection = null,
+        .file_type = null,
+        .data = null,
+    };
+    defer {
+        allocator.free(open_cmd.display_name);
+        allocator.free(open_cmd.real_path);
+        allocator.free(open_cmd.token);
+    }
+
+    // Act: this should detect existing file and send a close command
+    try handleOpenCommand(&client, &fm, open_cmd);
+
+    // Close writer to finish the pipe
+    posix.close(fds[1]);
+
+    // Read from the pipe
+    var out = std.ArrayList(u8).init(allocator);
+    defer out.deinit();
+    var buf: [256]u8 = undefined;
+    while (true) {
+        const n = posix.read(fds[0], &buf) catch |err| switch (err) {
+            else => return err,
+        };
+        if (n == 0) break;
+        try out.appendSlice(buf[0..n]);
+        if (n < buf.len) break;
+    }
+
+    // Expect a close command for the token
+    try testing.expectEqualStrings("close\ntoken: tok\n\n", out.items);
+
+    // Cleanup the pre-created temp file and directories
+    fm.cleanupTempPath(temp_path);
 }

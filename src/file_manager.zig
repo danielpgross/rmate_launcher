@@ -63,7 +63,7 @@ pub const FileManager = struct {
 
     pub fn writeTempFile(self: *FileManager, path: []const u8, data: []const u8) !void {
         _ = self;
-        const file = try fs.createFileAbsolute(path, .{});
+        const file = try fs.createFileAbsolute(path, .{ .exclusive = true });
         defer file.close();
         try file.writeAll(data);
     }
