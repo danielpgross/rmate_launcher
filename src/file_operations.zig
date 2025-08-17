@@ -28,6 +28,7 @@ pub fn handleOpenCommand(client_session: *session.ClientSession, fm: *file_manag
     fm.writeTempFile(temp_path, write_data) catch |err| switch (err) {
         error.PathAlreadyExists => {
             // Another session already created this temp file; close this token immediately
+            log.warn("Another session already created temp file, closing token immediately. Path: {s}", .{temp_path});
             const writer = client_session.stream.writer().any();
             var proto_writer = protocol.ProtocolWriter.init(writer);
             proto_writer.writeCloseCommand(cmd.token) catch |write_err| {
