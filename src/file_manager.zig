@@ -111,6 +111,99 @@ pub const FileManager = struct {
         }
     }
 
+    pub fn cleanupLeftoverHostDirs(self: *FileManager) void {
+        // Move any leftover host folders in base_dir into a quarantine directory only if needed:
+        //   base_dir/_recovered/YYYYMMDD-HHMMSS/
+        // Do not touch files (e.g., rmate.sock).
+        var base_dir_handle = fs.openDirAbsolute(self.base_dir, .{ .iterate = true }) catch |err| {
+            log.warn("Unable to open temp base directory: {s}: {}", .{ self.base_dir, err });
+            return;
+        };
+        defer base_dir_handle.close();
+
+        const recovered_rel = "_recovered";
+        var recovered_ts_rel: ?[]u8 = null;
+        defer if (recovered_ts_rel) |p| self.allocator.free(p);
+
+        var it = base_dir_handle.iterate();
+        while (true) {
+            const maybe_entry = it.next() catch |err| {
+                log.warn("Error iterating temp base directory {s}: {}", .{ self.base_dir, err });
+                break;
+            };
+            if (maybe_entry == null) break;
+            const entry = maybe_entry.?;
+
+            if (entry.kind != .directory) continue;
+            if (std.mem.eql(u8, entry.name, recovered_rel)) continue;
+
+            if (recovered_ts_rel == null) {
+                recovered_ts_rel = self.ensureRecoveredSubdir(base_dir_handle);
+                if (recovered_ts_rel == null) {
+                    // Failed to prepare recovered directory; abort cleanup
+                    return;
+                }
+            }
+
+            const new_rel = std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ recovered_ts_rel.?, entry.name }) catch {
+                log.warn("Failed to allocate target path for recovered folder {s}; skipping", .{entry.name});
+                continue;
+            };
+            defer self.allocator.free(new_rel);
+
+            log.warn("Quarantining leftover temp folder: {s}/{s} -> {s}/{s}", .{ self.base_dir, entry.name, self.base_dir, new_rel });
+            base_dir_handle.rename(entry.name, new_rel) catch |ren_err| {
+                log.warn("Failed to quarantine {s}/{s}: {}", .{ self.base_dir, entry.name, ren_err });
+            };
+        }
+    }
+
+    fn ensureRecoveredSubdir(self: *FileManager, base_dir_handle: fs.Dir) ?[]u8 {
+        // Ensure the _recovered parent exists
+        base_dir_handle.makePath("_recovered") catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => {
+                log.warn("Failed to create recovered directory {s}/_recovered: {}", .{ self.base_dir, err });
+                return null;
+            },
+        };
+
+        // Build timestamp string YYYYMMDD-HHMMSS using std.time and std.time.epoch
+        const now_i64 = std.time.timestamp();
+        const now_secs: u64 = if (now_i64 >= 0) @as(u64, @intCast(now_i64)) else 0;
+        const es = std.time.epoch.EpochSeconds{ .secs = now_secs };
+        const yd = es.getEpochDay().calculateYearDay();
+        const md = yd.calculateMonthDay();
+        const ds = es.getDaySeconds();
+        const ts = std.fmt.allocPrint(self.allocator, "{d}{d:0>2}{d:0>2}-{d:0>2}{d:0>2}{d:0>2}", .{
+            yd.year,
+            md.month.numeric(),
+            @as(u8, md.day_index) + 1,
+            ds.getHoursIntoDay(),
+            ds.getMinutesIntoHour(),
+            ds.getSecondsIntoMinute(),
+        }) catch {
+            log.warn("Failed to allocate timestamp for recovered directory; skipping cleanup", .{});
+            return null;
+        };
+        defer self.allocator.free(ts);
+
+        const recovered_ts_rel = std.fmt.allocPrint(self.allocator, "_recovered/{s}", .{ts}) catch {
+            log.warn("Failed to allocate recovered path; skipping cleanup", .{});
+            return null;
+        };
+
+        base_dir_handle.makePath(recovered_ts_rel) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => {
+                log.warn("Failed to create recovered timestamp directory {s}/{s}: {}", .{ self.base_dir, recovered_ts_rel, err });
+                self.allocator.free(recovered_ts_rel);
+                return null;
+            },
+        };
+        return recovered_ts_rel;
+    }
+
     fn sanitizeHostname(self: *FileManager, hostname: []const u8) ![]u8 {
         // Allow only hostname-safe characters: A-Z a-z 0-9 . - _ ; replace others with '_'
         var result = try self.allocator.alloc(u8, hostname.len);

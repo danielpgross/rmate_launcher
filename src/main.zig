@@ -6,6 +6,7 @@ const build_options = @import("build_options");
 const session = @import("session.zig");
 const client_handler = @import("client_handler.zig");
 const cli = @import("cli.zig");
+const file_manager = @import("file_manager.zig");
 const posix = std.posix;
 const atomic = std.atomic;
 const builtin = @import("builtin");
@@ -87,6 +88,13 @@ pub fn main() !void {
     // Parse command line arguments
     const should_exit = try cli.parseArgs(allocator);
     if (should_exit) return;
+
+    // Cleanup any leftover temp folders from previous runs
+    {
+        var fm = try file_manager.FileManager.init(allocator, null);
+        defer fm.deinit();
+        fm.cleanupLeftoverHostDirs();
+    }
 
     var session_manager = try session.SessionManager.init(allocator);
     defer session_manager.deinit();
