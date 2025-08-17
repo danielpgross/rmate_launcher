@@ -169,13 +169,23 @@ pub const EditorSpawner = struct {
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
 
+        log.debug("Spawning editor: {s}", .{full_cmd});
+        var timer = try std.time.Timer.start();
         try child.spawn();
         const result = try child.wait();
+        const elapsed_ms = timer.read() / std.time.ns_per_ms;
 
         switch (result) {
             .Exited => |code| {
+                log.debug("Editor exited with code {d} after {d}ms", .{ code, elapsed_ms });
                 if (code != 0) {
                     log.warn("Editor exited with code {d}", .{code});
+                }
+                if (code == 0 and elapsed_ms < 500) {
+                    log.warn(
+                        "Editor command returned after {d}ms; this usually means it did not block. Ensure your editor command waits for the file to close (e.g., \"code --wait\"). cmd=\"{s}\", path=\"{s}\"",
+                        .{ elapsed_ms, editor_cmd, file_path },
+                    );
                 }
             },
             else => {
