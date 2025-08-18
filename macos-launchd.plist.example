@@ -13,7 +13,8 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>RMATE_EDITOR</key>
-        <string>code --wait</string>
+        <!-- Be sure to specify the full path to the editor since the regular $PATH is not set -->
+        <string>/usr/local/bin/code --wait</string>
         <!-- RMATE_SOCKET defaults to ~/.rmate_launcher/rmate.sock if not specified -->
         <!-- 
         <key>RMATE_SOCKET</key>
@@ -28,10 +29,10 @@
     <true/>
     
     <key>StandardOutPath</key>
-    <string>/usr/local/var/log/rmate_launcher.log</string>
+    <string>/Users/USERNAME/Library/Logs/rmate_launcher.log</string>
     
     <key>StandardErrorPath</key>
-    <string>/usr/local/var/log/rmate_launcher-error.log</string>
+    <string>/Users/USERNAME/Library/Logs/rmate_launcher-error.log</string>
     
     <key>WorkingDirectory</key>
     <string>/Users/USERNAME/.rmate_launcher</string>

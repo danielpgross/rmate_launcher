@@ -10,7 +10,8 @@ Restart=always
 RestartSec=5
 
 # Environment variables
-Environment=RMATE_EDITOR=code --wait
+# Be sure to specify the full path to the editor in RMATE_EDITOR since the regular $PATH is not set
+Environment=RMATE_EDITOR=/usr/local/bin/code --wait
 # RMATE_SOCKET defaults to %h/.rmate_launcher/rmate.sock if not specified
 # Environment=RMATE_SOCKET=%h/.rmate_launcher/rmate.sock
 

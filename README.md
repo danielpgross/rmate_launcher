@@ -1,10 +1,19 @@
+<div align="center">
+  <img src="logo.png" alt="RMate Launcher Logo" width="200"/>
+  
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![Version](https://img.shields.io/badge/Version-0.7.0--dev-blue.svg)](https://github.com/danielpgross/rmate-server/releases)
+  [![Zig](https://img.shields.io/badge/Zig-0.14.1+-ff6600.svg?logo=zig&logoColor=white)](https://ziglang.org/)
+  [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/danielpgross/rmate-server)
+</div>
+
 # RMate Launcher
 
 Seamlessly edit files over SSH with a local editor of your choice, using the rmate protocol.
 
 ## Overview
 
-- ✅ **Remote file editing** via RMate protocol with any local editor
+- ✅ **Lightweight & Simple** - No external dependencies: runs in ~1MB RAM, installs with a single binary
 - ✅ **Multiple concurrent files** with real-time OS-level file watching
 - ✅ **Cross-platform** (Linux, macOS) with statically linked binaries
 - ✅ **Editor agnostic** - VS Code, Sublime Text, Zed, etc.
@@ -89,7 +98,7 @@ Download binaries from the [releases page](../../releases):
 
 ```bash
 # Download and install (example for Linux x86_64)
-curl -L -o rmate_launcher.tar.gz https://github.com/yourusername/rmate_launcher/releases/latest/download/rmate_launcher-linux-x86_64.tar.gz
+curl -L -o rmate_launcher.tar.gz https://github.com/danielpgross/rmate_launcher/releases/latest/download/rmate_launcher-linux-x86_64.tar.gz
 tar -xzf rmate_launcher.tar.gz && chmod +x rmate_launcher-linux-x86_64
 mv rmate_launcher-linux-x86_64 /usr/local/bin/rmate_launcher
 ```
@@ -98,7 +107,7 @@ mv rmate_launcher-linux-x86_64 /usr/local/bin/rmate_launcher
 
 Requires [Zig](https://ziglang.org/) 0.14.1+:
 ```bash
-git clone https://github.com/yourusername/rmate_launcher.git && cd rmate_launcher
+git clone https://github.com/danielpgross/rmate_launcher.git && cd rmate_launcher
 zig build -Doptimize=ReleaseSmall  # or just 'zig build' for development
 ```
 
@@ -132,7 +141,9 @@ All configuration is defined in environment variables.
 
 ### Required
 
-`RMATE_EDITOR` - Editor command to run. Path to the temp file will be passed as the first argument.
+`RMATE_EDITOR` - Editor command to run
+* Path to the temp file will be passed as the first argument.
+* **Command must block until editing is done** (pass `--wait` flag or similar).
 ```bash
 export RMATE_EDITOR="code --wait"    # VS Code
 export RMATE_EDITOR="vim"            # Vim  
