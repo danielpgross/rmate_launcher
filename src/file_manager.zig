@@ -1,5 +1,6 @@
 const std = @import("std");
 const fs = std.fs;
+const posix = std.posix;
 const log = std.log.scoped(.file_manager);
 
 pub const FileManager = struct {
@@ -19,6 +20,11 @@ pub const FileManager = struct {
         fs.makeDirAbsolute(base_path) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return err,
+        };
+
+        // Harden permissions on the base directory so only the user can access it
+        posix.fchmodat(posix.AT.FDCWD, base_path, 0o700, 0) catch |chmod_err| {
+            log.warn("Failed to set permissions 0700 on {s}: {}", .{ base_path, chmod_err });
         };
 
         // Transfer ownership if we allocated, otherwise dupe the provided slice

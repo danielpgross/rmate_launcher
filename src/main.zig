@@ -122,6 +122,10 @@ pub fn main() !void {
             .kernel_backlog = 128,
         });
 
+        std.posix.fchmodat(std.posix.AT.FDCWD, socket_path, 0o600, 0) catch |chmod_err| {
+            log.warn("Failed to set permissions 0600 on socket {s}: {}", .{ socket_path, chmod_err });
+        };
+
         log.info("RMate Launcher {} listening on Unix socket: {s}", .{ build_options.version, socket_path });
         break :blk unix_listener;
     } else blk: {
