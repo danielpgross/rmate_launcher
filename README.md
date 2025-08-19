@@ -46,7 +46,7 @@ Editor-specific extensions ([RemoteSubl](https://github.com/randy3k/RemoteSubl),
 RMATE_EDITOR="code --wait" rmate_launcher &
 
 # 2. Start SSH session with tunnel
-ssh -R 52698:~/.rmate_launcher/rmate.sock user@remote-server
+ssh -R 52698:$HOME/.rmate_launcher/rmate.sock user@remote-server
 
 # 3. Edit remote files (opens in your local editor!)
 # In remote SSH session:

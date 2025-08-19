@@ -35,7 +35,7 @@ HOW IT WORKS:
 SECURITY:
 - Uses Unix sockets by default (no network exposure)
 - All temp files restricted to ~/.rmate_launcher/ directory
-- SSH tunnel: ssh -R 52698:~/.rmate_launcher/rmate.sock user@host
+- SSH tunnel: ssh -R 52698:$HOME/.rmate_launcher/rmate.sock user@host
 
 The server supports multiple files opened concurrently.
 
