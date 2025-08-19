@@ -19,6 +19,10 @@ Seamlessly edit files over SSH with a local editor of your choice, using the rma
 - ✅ **Editor agnostic** - VS Code, Sublime Text, Zed, etc.
 - ✅ **Always available** - Runs as standalone service, independent of editor
 
+### Demo
+
+![RMate Launcher Demo](demo.gif)
+
 ### How it works
 
 1. RMate client on remote server connects via SSH tunnel to local RMate Launcher
