@@ -112,7 +112,7 @@ mv rmate_launcher-linux-x86_64 /usr/local/bin/rmate_launcher
 Requires [Zig](https://ziglang.org/) 0.14.1+:
 ```bash
 git clone https://github.com/danielpgross/rmate_launcher.git && cd rmate_launcher
-zig build -Doptimize=ReleaseSmall  # or just 'zig build' for development
+zig build -Doptimize=ReleaseSafe  # or just 'zig build' for development
 ```
 
 ## Running as a service
@@ -182,10 +182,10 @@ export RMATE_EDITOR="$HOME/.rmate_launcher/editor-selector.sh"
 **Prerequisites:** [Zig](https://ziglang.org/) 0.14.1+
 
 ```bash
-zig build                                                    # Development build
-zig build -Doptimize=ReleaseSmall                           # Optimized build  
-zig build test                                               # Run tests
-zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSmall # Cross-compile
+zig build                                                   # Development build
+zig build -Doptimize=ReleaseSafe                            # Optimized build  
+zig build test                                              # Run tests
+zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe  # Cross-compile
 
 # Run locally
 export RMATE_EDITOR="code --wait" && zig build run

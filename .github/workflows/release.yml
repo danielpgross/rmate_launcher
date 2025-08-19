@@ -35,7 +35,7 @@ jobs:
         
       - name: Build for ${{ matrix.target }}
         run: |
-          zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
+          zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe
           
       - name: Package binary
         run: |
