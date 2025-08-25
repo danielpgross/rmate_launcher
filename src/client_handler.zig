@@ -21,7 +21,9 @@ pub fn handleClient(session_manager: *session.SessionManager, stream: net.Stream
 
     var arena = std.heap.ArenaAllocator.init(session_manager.allocator);
     defer arena.deinit();
-    const allocator = arena.allocator();
+    const arena_allocator = arena.allocator();
+    var thread_safe = std.heap.ThreadSafeAllocator{ .child_allocator = arena_allocator };
+    const allocator = thread_safe.allocator();
 
     var client_session = session.ClientSession.init(stream, allocator, &session_manager.config);
     defer client_session.deinit();
