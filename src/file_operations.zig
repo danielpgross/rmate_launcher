@@ -20,14 +20,12 @@ pub fn handleOpenCommand(client_session: *session.ClientSession, fm: *file_manag
         hostname = cmd.display_name[0..colon_idx];
     }
 
-    // Create temp file
     const temp_path = try fm.createTempFile(hostname, remote_path);
 
     // Determine initial content and write once with shared error handling
     const write_data: []const u8 = if (cmd.data) |d| d else "";
     fm.writeTempFile(temp_path, write_data) catch |err| switch (err) {
         error.PathAlreadyExists => {
-            // Another session already created this temp file; close this token immediately
             log.warn("Another session already created temp file, closing token immediately. Path: {s}", .{temp_path});
             const writer = client_session.stream.writer().any();
             var proto_writer = protocol.ProtocolWriter.init(writer);
@@ -41,7 +39,6 @@ pub fn handleOpenCommand(client_session: *session.ClientSession, fm: *file_manag
         else => return err,
     };
 
-    // Create file session
     var file_session = session.FileSession{
         .token = cmd.token,
         .display_name = cmd.display_name,
@@ -74,10 +71,8 @@ pub fn handleOpenCommand(client_session: *session.ClientSession, fm: *file_manag
 
     try client_session.files.append(file_session);
 
-    // Get editor command
-    const editor_cmd = client_session.config.getEditor(hostname, remote_path);
-
     // Spawn editor in a separate thread and track lifecycle with wait group
+    const editor_cmd = client_session.config.getEditor(hostname, remote_path);
     const editor_ctx = try client_session.allocator.create(session.EditorContext);
     editor_ctx.* = .{
         .session = client_session,

@@ -27,25 +27,21 @@ pub fn handleClient(session_manager: *session.SessionManager, stream: net.Stream
 
     var client_session = session.ClientSession.init(stream, allocator, &session_manager.config);
     defer client_session.deinit();
-
     log.debug("handleClient: Session initialized", .{});
 
     // Create file manager
     var fm = try file_manager.FileManager.init(allocator, null);
     defer fm.deinit();
-
     log.debug("handleClient: File manager initialized", .{});
 
     // Create protocol parser
     const reader = stream.reader().any();
     var parser = protocol.ProtocolParser.init(allocator, reader);
-
     log.debug("handleClient: Protocol parser initialized, reading commands...", .{});
 
     // Read commands
     const commands = try parser.readCommands();
     defer commands.deinit();
-
     log.debug("handleClient: Read {} commands", .{commands.items.len});
 
     // Process commands
@@ -66,7 +62,6 @@ pub fn handleClient(session_manager: *session.SessionManager, stream: net.Stream
     }
 
     log.debug("handleClient: All commands processed, waiting for files to close", .{});
-    // Wait for all editor threads to complete
     client_session.wait_group.wait();
 
     log.debug("handleClient: All files closed, client handler exiting", .{});
