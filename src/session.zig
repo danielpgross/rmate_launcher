@@ -64,7 +64,6 @@ pub const WatcherContext = struct {
     fm: *@import("file_manager.zig").FileManager,
     token: []const u8,
     temp_path: []const u8,
-    mutex: std.Thread.Mutex,
 };
 
 pub const EditorContext = struct {

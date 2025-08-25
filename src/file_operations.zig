@@ -58,7 +58,6 @@ pub fn handleOpenCommand(client_session: *session.ClientSession, fm: *file_manag
             .fm = fm,
             .token = file_session.token,
             .temp_path = file_session.temp_path,
-            .mutex = std.Thread.Mutex{},
         };
 
         const watcher = try client_session.allocator.create(FileWatcher);
@@ -96,10 +95,6 @@ pub fn fileChangedCallback(ctx: *anyopaque, path: []const u8) void {
     log.info("File changed: {s}", .{path});
     log.debug("fileChangedCallback: Reading file at path: {s}", .{watcher_ctx.temp_path});
 
-    // Lock to ensure thread safety
-    watcher_ctx.mutex.lock();
-    defer watcher_ctx.mutex.unlock();
-
     // Read the file contents
     const contents = watcher_ctx.fm.readTempFile(watcher_ctx.temp_path) catch |err| {
         log.err("Failed to read changed file: {}", .{err});
@@ -132,44 +127,40 @@ fn editorThread(ctx: *session.EditorContext) !void {
         log.err("Failed to spawn editor: {}", .{err});
     };
 
-    // Send close command to client
+    // Stop watcher first to prevent any further save events before we notify close
+    const match_index = blk: {
+        for (ctx.session.files.items, 0..) |*f, idx| {
+            if (std.mem.eql(u8, f.token, ctx.token)) break :blk idx;
+        }
+        std.debug.panic("editorThread: matching file session not found", .{});
+    };
+    var file = &ctx.session.files.items[match_index];
+
+    // Stop and cleanup watcher (joins background thread)
+    if (file.watcher) |watcher| {
+        watcher.deinit();
+        ctx.session.allocator.destroy(watcher);
+        file.watcher = null;
+    }
+
+    // Cleanup watcher context now that watcher is stopped
+    if (file.watcher_context) |watcher_ctx| {
+        ctx.session.allocator.destroy(watcher_ctx);
+        file.watcher_context = null;
+    }
+
+    // Now that watcher is stopped, send close command to client
     const writer = ctx.session.stream.writer().any();
     var proto_writer = protocol.ProtocolWriter.init(writer);
     proto_writer.writeCloseCommand(ctx.token) catch |err| {
         log.err("Failed to send close command: {}", .{err});
     };
 
-    // Stop and cleanup resources BEFORE removing the session entry to avoid races
-    var i: usize = 0;
-    while (i < ctx.session.files.items.len) {
-        if (std.mem.eql(u8, ctx.session.files.items[i].token, ctx.token)) {
-            // Grab needed resources while the entry still exists
-            const temp_path = ctx.session.files.items[i].temp_path;
-            const watcher_ptr = ctx.session.files.items[i].watcher;
-            const watcher_ctx_ptr = ctx.session.files.items[i].watcher_context;
+    // Cleanup temp file and any empty parent directories
+    ctx.fm.cleanupTempPath(file.temp_path);
 
-            // Stop and cleanup watcher (joins background thread)
-            if (watcher_ptr) |watcher| {
-                watcher.deinit();
-                ctx.session.allocator.destroy(watcher);
-                ctx.session.files.items[i].watcher = null;
-            }
-
-            // Cleanup watcher context
-            if (watcher_ctx_ptr) |watcher_ctx| {
-                ctx.session.allocator.destroy(watcher_ctx);
-                ctx.session.files.items[i].watcher_context = null;
-            }
-
-            // Cleanup temp file and any empty parent directories
-            ctx.fm.cleanupTempPath(temp_path);
-
-            // Now remove the file session entry
-            _ = ctx.session.files.orderedRemove(i);
-            break;
-        }
-        i += 1;
-    }
+    // Now remove the file session entry by the known index
+    _ = ctx.session.files.orderedRemove(match_index);
 
     log.info("Editor closed for file: {s}", .{ctx.token});
     // Signal completion to wait group last
