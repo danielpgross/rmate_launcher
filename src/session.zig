@@ -31,6 +31,7 @@ pub const ClientSession = struct {
     files: std.ArrayList(FileSession),
     allocator: std.mem.Allocator,
     config: *const Config,
+    wait_group: Thread.WaitGroup,
 
     pub fn init(stream: net.Stream, allocator: std.mem.Allocator, config: *const Config) ClientSession {
         return .{
@@ -38,6 +39,7 @@ pub const ClientSession = struct {
             .files = std.ArrayList(FileSession).init(allocator),
             .allocator = allocator,
             .config = config,
+            .wait_group = .{},
         };
     }
 

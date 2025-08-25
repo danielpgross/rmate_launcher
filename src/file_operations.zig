@@ -77,7 +77,7 @@ pub fn handleOpenCommand(client_session: *session.ClientSession, fm: *file_manag
     // Get editor command
     const editor_cmd = client_session.config.getEditor(hostname, remote_path);
 
-    // Spawn editor in a separate thread
+    // Spawn editor in a separate thread and track lifecycle with wait group
     const editor_ctx = try client_session.allocator.create(session.EditorContext);
     editor_ctx.* = .{
         .session = client_session,
@@ -86,8 +86,12 @@ pub fn handleOpenCommand(client_session: *session.ClientSession, fm: *file_manag
         .temp_path = temp_path,
         .token = cmd.token,
     };
-
-    const thread = try Thread.spawn(.{}, editorThread, .{editor_ctx});
+    client_session.wait_group.start();
+    const thread = Thread.spawn(.{}, editorThread, .{editor_ctx}) catch |err| {
+        // Balance the start on spawn failure
+        client_session.wait_group.finish();
+        return err;
+    };
     thread.detach();
 }
 
@@ -173,6 +177,8 @@ fn editorThread(ctx: *session.EditorContext) !void {
     }
 
     log.info("Editor closed for file: {s}", .{ctx.token});
+    // Signal completion to wait group last
+    ctx.session.wait_group.finish();
 }
 
 // Unit test: duplicate open triggers immediate close

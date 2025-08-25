@@ -64,11 +64,8 @@ pub fn handleClient(session_manager: *session.SessionManager, stream: net.Stream
     }
 
     log.debug("handleClient: All commands processed, waiting for files to close", .{});
-
-    // Wait for all files to be closed
-    while (client_session.files.items.len > 0) {
-        std.time.sleep(100 * std.time.ns_per_ms);
-    }
+    // Wait for all editor threads to complete
+    client_session.wait_group.wait();
 
     log.debug("handleClient: All files closed, client handler exiting", .{});
 }
