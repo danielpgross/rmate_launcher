@@ -8,6 +8,7 @@ pub const Config = struct {
     socket_path: ?[]const u8, // If present, use Unix socket
     port: ?u16, // If socket_path is null, use TCP with these
     ip: ?[]const u8, // If socket_path is null, use TCP with these
+    base_dir: []const u8,
 
     pub fn init() !Config {
         const editor = std.process.getEnvVarOwned(std.heap.page_allocator, "RMATE_EDITOR") catch |err| switch (err) {
@@ -70,11 +71,26 @@ pub const Config = struct {
             log.info("Using TCP socket: {s}:{}", .{ ip.?, port });
         }
 
+        // Determine base directory for temp files
+        const base_dir = blk: {
+            if (std.process.getEnvVarOwned(std.heap.page_allocator, "RMATE_BASE_DIR")) |bd| {
+                break :blk bd;
+            } else |err| switch (err) {
+                error.EnvironmentVariableNotFound => {
+                    const home = std.process.getEnvVarOwned(std.heap.page_allocator, "HOME") catch return error.NoHomeDir;
+                    defer std.heap.page_allocator.free(home);
+                    break :blk try std.fmt.allocPrint(std.heap.page_allocator, "{s}/.rmate_launcher", .{home});
+                },
+                else => return err,
+            }
+        };
+
         return .{
             .default_editor = editor,
             .socket_path = socket_path,
             .port = if (use_tcp) port else null,
             .ip = ip,
+            .base_dir = base_dir,
         };
     }
 
@@ -86,6 +102,7 @@ pub const Config = struct {
         if (self.socket_path) |path| {
             std.heap.page_allocator.free(path);
         }
+        std.heap.page_allocator.free(self.base_dir);
     }
 
     pub fn isUnixSocket(self: *const Config) bool {

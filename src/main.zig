@@ -3,7 +3,6 @@ const net = std.net;
 const Thread = std.Thread;
 const build_options = @import("build_options");
 
-const session = @import("session.zig");
 const client_handler = @import("client_handler.zig");
 const cli = @import("cli.zig");
 const file_manager = @import("file_manager.zig");
@@ -24,7 +23,9 @@ fn handleSignal(sig: c_int) callconv(.C) void {
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const base_allocator = gpa.allocator();
+    var thread_safe = std.heap.ThreadSafeAllocator{ .child_allocator = base_allocator };
+    const allocator = thread_safe.allocator();
 
     // Parse command line arguments
     const should_exit = try cli.parseArgs(allocator);
@@ -41,19 +42,22 @@ pub fn main() !void {
         posix.sigaction(posix.SIG.TERM, &sa, null);
     }
 
-    // Cleanup any leftover temp folders from previous runs
+    // Load configuration (includes base_dir)
+    var cfg = try @import("config.zig").Config.init();
+    defer cfg.deinit();
+
+    // Ensure base_dir exists and cleanup leftovers
     {
-        var fm = try file_manager.FileManager.init(allocator, null);
-        defer fm.deinit();
-        fm.cleanupLeftoverHostDirs();
+        const base_dir = try file_manager.initBaseDir(allocator, cfg.base_dir);
+        defer allocator.free(base_dir);
+        file_manager.cleanupLeftoverHostDirs(allocator, base_dir);
     }
 
-    var session_manager = try session.SessionManager.init(allocator);
-    defer session_manager.deinit();
+    // Removed SessionManager; pass config and allocator directly
 
     // Setup server (Unix socket or TCP)
-    var listener = if (session_manager.config.isUnixSocket()) blk: {
-        const socket_path = session_manager.config.socket_path.?;
+    var listener = if (cfg.isUnixSocket()) blk: {
+        const socket_path = cfg.socket_path.?;
 
         // Remove existing socket file if it exists
         std.fs.deleteFileAbsolute(socket_path) catch |err| switch (err) {
@@ -81,8 +85,8 @@ pub fn main() !void {
         log.info("RMate Launcher {} listening on Unix socket: {s}", .{ build_options.version, socket_path });
         break :blk unix_listener;
     } else blk: {
-        const ip = session_manager.config.ip.?;
-        const port = session_manager.config.port.?;
+        const ip = cfg.ip.?;
+        const port = cfg.port.?;
         const address = try net.Address.parseIp(ip, port);
         const tcp_listener = try address.listen(.{
             .reuse_address = true,
@@ -95,7 +99,7 @@ pub fn main() !void {
     defer listener.deinit();
 
     // Setup cleanup for Unix socket
-    const cleanup_socket_path = session_manager.config.socket_path;
+    const cleanup_socket_path = cfg.socket_path;
     defer {
         if (cleanup_socket_path) |socket_path| {
             std.fs.deleteFileAbsolute(socket_path) catch |err| {
@@ -116,10 +120,7 @@ pub fn main() !void {
             try connection.stream.writeAll(version_string);
 
             // Spawn thread to handle client
-            const thread = Thread.spawn(.{}, client_handler.handleClientWrapper, .{
-                &session_manager,
-                connection.stream,
-            }) catch |err| {
+            const thread = Thread.spawn(.{}, client_handler.handleClientWrapper, .{ &cfg, allocator, connection.stream }) catch |err| {
                 log.err("Failed to spawn client handler thread: {}", .{err});
                 connection.stream.close();
                 continue;

@@ -1,12 +1,6 @@
 const std = @import("std");
 const log = std.log.scoped(.protocol);
 
-pub const Command = union(enum) {
-    open: OpenCommand,
-    save: SaveCommand,
-    close: CloseCommand,
-};
-
 pub const OpenCommand = struct {
     display_name: []u8,
     real_path: []u8,
@@ -18,217 +12,122 @@ pub const OpenCommand = struct {
     data: ?[]u8 = null,
 };
 
-pub const SaveCommand = struct {
-    token: []u8,
-    data: []u8,
-};
+pub fn parseCommands(allocator: std.mem.Allocator, reader: std.io.AnyReader) !std.ArrayList(OpenCommand) {
+    var commands = std.ArrayList(OpenCommand).init(allocator);
+    errdefer commands.deinit();
 
-pub const CloseCommand = struct {
-    token: []u8,
-};
+    log.debug("readCommands: Starting to read commands", .{});
 
-pub const ProtocolParser = struct {
-    allocator: std.mem.Allocator,
-    reader: std.io.AnyReader,
+    while (true) {
+        const line = try readLine(allocator, reader);
+        defer allocator.free(line);
 
-    pub fn init(allocator: std.mem.Allocator, reader: std.io.AnyReader) ProtocolParser {
-        return .{
-            .allocator = allocator,
-            .reader = reader,
-        };
+        log.debug("readCommands: Read line: '{s}'", .{line});
+
+        if (std.mem.eql(u8, line, ".")) {
+            log.debug("readCommands: Found end marker", .{});
+            break;
+        }
+
+        if (std.mem.eql(u8, line, "open")) {
+            log.debug("readCommands: Parsing open command", .{});
+            const cmd = try parseOpenCommand(allocator, reader);
+            try commands.append(cmd);
+        } else if (line.len > 0) {
+            log.warn("Unknown command: {s}", .{line});
+        }
+        // Silently ignore empty lines
     }
 
-    pub fn readCommands(self: *ProtocolParser) !std.ArrayList(Command) {
-        var commands = std.ArrayList(Command).init(self.allocator);
-        errdefer commands.deinit();
+    log.debug("readCommands: Finished reading {} commands", .{commands.items.len});
+    return commands;
+}
 
-        log.debug("readCommands: Starting to read commands", .{});
+fn readLine(allocator: std.mem.Allocator, reader: std.io.AnyReader) ![]u8 {
+    var buf = std.ArrayList(u8).init(allocator);
+    errdefer buf.deinit();
 
-        while (true) {
-            const line = try self.readLine();
-            defer self.allocator.free(line);
+    while (true) {
+        const byte = try reader.readByte();
+        if (byte == '\n') break;
+        try buf.append(byte);
+    }
 
-            log.debug("readCommands: Read line: '{s}'", .{line});
+    return try buf.toOwnedSlice();
+}
 
-            // Check for end marker
-            if (std.mem.eql(u8, line, ".")) {
-                log.debug("readCommands: Found end marker", .{});
+fn parseOpenCommand(allocator: std.mem.Allocator, reader: std.io.AnyReader) !OpenCommand {
+    var cmd = OpenCommand{
+        .display_name = undefined,
+        .real_path = undefined,
+        .token = undefined,
+    };
+
+    log.debug("parseOpenCommand: Starting to parse open command", .{});
+
+    while (true) {
+        const line = try readLine(allocator, reader);
+        defer allocator.free(line);
+
+        log.debug("parseOpenCommand: Read line: '{s}'", .{line});
+
+        if (line.len == 0) {
+            log.debug("parseOpenCommand: Found empty line, ending variable parsing", .{});
+            break; // Empty line ends variables
+        }
+
+        if (std.mem.indexOf(u8, line, ": ")) |sep_idx| {
+            const key = line[0..sep_idx];
+            const value = line[sep_idx + 2 ..];
+
+            log.debug("parseOpenCommand: Found key='{s}', value='{s}'", .{ key, value });
+
+            if (std.mem.eql(u8, key, "display-name")) {
+                cmd.display_name = try allocator.dupe(u8, value);
+            } else if (std.mem.eql(u8, key, "real-path")) {
+                cmd.real_path = try allocator.dupe(u8, value);
+            } else if (std.mem.eql(u8, key, "data-on-save")) {
+                cmd.data_on_save = std.mem.eql(u8, value, "yes");
+            } else if (std.mem.eql(u8, key, "re-activate")) {
+                cmd.re_activate = std.mem.eql(u8, value, "yes");
+            } else if (std.mem.eql(u8, key, "token")) {
+                cmd.token = try allocator.dupe(u8, value);
+            } else if (std.mem.eql(u8, key, "selection")) {
+                cmd.selection = try allocator.dupe(u8, value);
+            } else if (std.mem.eql(u8, key, "file-type")) {
+                cmd.file_type = try allocator.dupe(u8, value);
+            } else if (std.mem.eql(u8, key, "data")) {
+                const size = try std.fmt.parseInt(usize, value, 10);
+                log.debug("parseOpenCommand: Reading {} bytes of data", .{size});
+                cmd.data = try allocator.alloc(u8, size);
+                _ = try reader.readAll(cmd.data.?);
                 break;
             }
-
-            // Parse command
-            if (std.mem.eql(u8, line, "open")) {
-                log.debug("readCommands: Parsing open command", .{});
-                const cmd = try self.parseOpenCommand();
-                try commands.append(.{ .open = cmd });
-            } else if (std.mem.eql(u8, line, "save")) {
-                log.debug("readCommands: Parsing save command", .{});
-                const cmd = try self.parseSaveCommand();
-                try commands.append(.{ .save = cmd });
-            } else if (std.mem.eql(u8, line, "close")) {
-                log.debug("readCommands: Parsing close command", .{});
-                const cmd = try self.parseCloseCommand();
-                try commands.append(.{ .close = cmd });
-            } else if (line.len > 0) {
-                log.warn("Unknown command: {s}", .{line});
-            }
-            // Silently ignore empty lines
         }
-
-        log.debug("readCommands: Finished reading {} commands", .{commands.items.len});
-        return commands;
     }
 
-    fn readLine(self: *ProtocolParser) ![]u8 {
-        var buf = std.ArrayList(u8).init(self.allocator);
-        errdefer buf.deinit();
+    log.debug("parseOpenCommand: Finished parsing open command", .{});
+    return cmd;
+}
 
-        while (true) {
-            const byte = try self.reader.readByte();
-            if (byte == '\n') break;
-            try buf.append(byte);
-        }
+pub fn writeSaveCommand(writer: std.io.AnyWriter, token: []const u8, data: []const u8) !void {
+    log.debug("writeSaveCommand: Writing save command for token: {s}, data length: {d}", .{ token, data.len });
+    log.debug("writeSaveCommand: File content: '{s}'", .{data});
 
-        return try buf.toOwnedSlice();
-    }
+    try writer.writeAll("save\n");
+    try writer.print("token: {s}\n", .{token});
+    try writer.print("data: {d}\n", .{data.len});
+    try writer.writeAll(data);
+    try writer.writeAll("\n");
 
-    fn parseOpenCommand(self: *ProtocolParser) !OpenCommand {
-        var cmd = OpenCommand{
-            .display_name = undefined,
-            .real_path = undefined,
-            .token = undefined,
-        };
+    log.debug("writeSaveCommand: Complete command sent", .{});
+}
 
-        log.debug("parseOpenCommand: Starting to parse open command", .{});
-
-        while (true) {
-            const line = try self.readLine();
-            defer self.allocator.free(line);
-
-            log.debug("parseOpenCommand: Read line: '{s}'", .{line});
-
-            if (line.len == 0) {
-                log.debug("parseOpenCommand: Found empty line, ending variable parsing", .{});
-                break; // Empty line ends variables
-            }
-
-            if (std.mem.indexOf(u8, line, ": ")) |sep_idx| {
-                const key = line[0..sep_idx];
-                const value = line[sep_idx + 2 ..];
-
-                log.debug("parseOpenCommand: Found key='{s}', value='{s}'", .{ key, value });
-
-                if (std.mem.eql(u8, key, "display-name")) {
-                    cmd.display_name = try self.allocator.dupe(u8, value);
-                } else if (std.mem.eql(u8, key, "real-path")) {
-                    cmd.real_path = try self.allocator.dupe(u8, value);
-                } else if (std.mem.eql(u8, key, "data-on-save")) {
-                    cmd.data_on_save = std.mem.eql(u8, value, "yes");
-                } else if (std.mem.eql(u8, key, "re-activate")) {
-                    cmd.re_activate = std.mem.eql(u8, value, "yes");
-                } else if (std.mem.eql(u8, key, "token")) {
-                    cmd.token = try self.allocator.dupe(u8, value);
-                } else if (std.mem.eql(u8, key, "selection")) {
-                    cmd.selection = try self.allocator.dupe(u8, value);
-                } else if (std.mem.eql(u8, key, "file-type")) {
-                    cmd.file_type = try self.allocator.dupe(u8, value);
-                } else if (std.mem.eql(u8, key, "data")) {
-                    const size = try std.fmt.parseInt(usize, value, 10);
-                    log.debug("parseOpenCommand: Reading {} bytes of data", .{size});
-                    cmd.data = try self.allocator.alloc(u8, size);
-                    _ = try self.reader.readAll(cmd.data.?);
-                    // The data section is always last, so break out of the parsing loop
-                    // Don't read an extra line - let the main parsing loop handle command termination
-                    break;
-                }
-            }
-        }
-
-        log.debug("parseOpenCommand: Finished parsing open command", .{});
-        return cmd;
-    }
-
-    fn parseSaveCommand(self: *ProtocolParser) !SaveCommand {
-        var cmd = SaveCommand{
-            .token = undefined,
-            .data = undefined,
-        };
-
-        while (true) {
-            const line = try self.readLine();
-            defer self.allocator.free(line);
-
-            if (line.len == 0) break;
-
-            if (std.mem.indexOf(u8, line, ": ")) |sep_idx| {
-                const key = line[0..sep_idx];
-                const value = line[sep_idx + 2 ..];
-
-                if (std.mem.eql(u8, key, "token")) {
-                    cmd.token = try self.allocator.dupe(u8, value);
-                } else if (std.mem.eql(u8, key, "data")) {
-                    const size = try std.fmt.parseInt(usize, value, 10);
-                    cmd.data = try self.allocator.alloc(u8, size);
-                    _ = try self.reader.readAll(cmd.data);
-                    _ = try self.readLine(); // Read trailing newline
-                }
-            }
-        }
-
-        return cmd;
-    }
-
-    fn parseCloseCommand(self: *ProtocolParser) !CloseCommand {
-        var cmd = CloseCommand{
-            .token = undefined,
-        };
-
-        while (true) {
-            const line = try self.readLine();
-            defer self.allocator.free(line);
-
-            if (line.len == 0) break;
-
-            if (std.mem.indexOf(u8, line, ": ")) |sep_idx| {
-                const key = line[0..sep_idx];
-                const value = line[sep_idx + 2 ..];
-
-                if (std.mem.eql(u8, key, "token")) {
-                    cmd.token = try self.allocator.dupe(u8, value);
-                }
-            }
-        }
-
-        return cmd;
-    }
-};
-
-pub const ProtocolWriter = struct {
-    writer: std.io.AnyWriter,
-
-    pub fn init(writer: std.io.AnyWriter) ProtocolWriter {
-        return .{ .writer = writer };
-    }
-
-    pub fn writeSaveCommand(self: *ProtocolWriter, token: []const u8, data: []const u8) !void {
-        log.debug("writeSaveCommand: Writing save command for token: {s}, data length: {d}", .{ token, data.len });
-        log.debug("writeSaveCommand: File content: '{s}'", .{data});
-
-        try self.writer.writeAll("save\n");
-        try self.writer.print("token: {s}\n", .{token});
-        try self.writer.print("data: {d}\n", .{data.len});
-        try self.writer.writeAll(data);
-        try self.writer.writeAll("\n");
-
-        log.debug("writeSaveCommand: Complete command sent", .{});
-    }
-
-    pub fn writeCloseCommand(self: *ProtocolWriter, token: []const u8) !void {
-        try self.writer.writeAll("close\n");
-        try self.writer.print("token: {s}\n", .{token});
-        try self.writer.writeAll("\n");
-    }
-};
+pub fn writeCloseCommand(writer: std.io.AnyWriter, token: []const u8) !void {
+    try writer.writeAll("close\n");
+    try writer.print("token: {s}\n", .{token});
+    try writer.writeAll("\n");
+}
 
 // Unit Tests
 test "parse basic open command" {
@@ -247,15 +146,12 @@ test "parse basic open command" {
     ;
 
     var stream = std.io.fixedBufferStream(input);
-    var parser = ProtocolParser.init(allocator, stream.reader().any());
-
-    const commands = try parser.readCommands();
+    const commands = try parseCommands(allocator, stream.reader().any());
     defer commands.deinit();
 
     try std.testing.expect(commands.items.len == 1);
-    try std.testing.expect(std.meta.activeTag(commands.items[0]) == .open);
 
-    const open_cmd = commands.items[0].open;
+    const open_cmd = commands.items[0];
     try std.testing.expectEqualStrings("test.txt", open_cmd.display_name);
     try std.testing.expectEqualStrings("/path/to/test.txt", open_cmd.real_path);
     try std.testing.expectEqualStrings("abc123", open_cmd.token);
@@ -289,13 +185,11 @@ test "parse open command with all fields" {
     try input_data.appendSlice("\n.\n");
 
     var stream = std.io.fixedBufferStream(input_data.items);
-    var parser = ProtocolParser.init(allocator, stream.reader().any());
-
-    const commands = try parser.readCommands();
+    const commands = try parseCommands(allocator, stream.reader().any());
     defer commands.deinit();
 
     try std.testing.expect(commands.items.len == 1);
-    const open_cmd = commands.items[0].open;
+    const open_cmd = commands.items[0];
 
     try std.testing.expectEqualStrings("config.json", open_cmd.display_name);
     try std.testing.expectEqualStrings("/etc/config.json", open_cmd.real_path);
@@ -305,61 +199,6 @@ test "parse open command with all fields" {
     try std.testing.expectEqualStrings("1:5-2:10", open_cmd.selection.?);
     try std.testing.expectEqualStrings("json", open_cmd.file_type.?);
     try std.testing.expectEqualStrings(data_content, open_cmd.data.?);
-}
-
-test "parse save command" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    const input =
-        \\save
-        \\token: abc123
-        \\data: 12
-        \\hello world!
-        \\
-        \\.
-        \\
-    ;
-
-    var stream = std.io.fixedBufferStream(input);
-    var parser = ProtocolParser.init(allocator, stream.reader().any());
-
-    const commands = try parser.readCommands();
-    defer commands.deinit();
-
-    try std.testing.expect(commands.items.len == 1);
-    try std.testing.expect(std.meta.activeTag(commands.items[0]) == .save);
-
-    const save_cmd = commands.items[0].save;
-    try std.testing.expectEqualStrings("abc123", save_cmd.token);
-    try std.testing.expectEqualStrings("hello world!", save_cmd.data);
-}
-
-test "parse close command" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    const input =
-        \\close
-        \\token: abc123
-        \\
-        \\.
-        \\
-    ;
-
-    var stream = std.io.fixedBufferStream(input);
-    var parser = ProtocolParser.init(allocator, stream.reader().any());
-
-    const commands = try parser.readCommands();
-    defer commands.deinit();
-
-    try std.testing.expect(commands.items.len == 1);
-    try std.testing.expect(std.meta.activeTag(commands.items[0]) == .close);
-
-    const close_cmd = commands.items[0].close;
-    try std.testing.expectEqualStrings("abc123", close_cmd.token);
 }
 
 test "parse multiple commands" {
@@ -373,38 +212,26 @@ test "parse multiple commands" {
         \\real-path: /path/file1.txt
         \\token: token1
         \\
-        \\save
+        \\open
+        \\display-name: file2.txt
+        \\real-path: /path/file2.txt
         \\token: token2
-        \\data: 5
-        \\hello
-        \\
-        \\close
-        \\token: token3
         \\
         \\.
         \\
     ;
 
     var stream = std.io.fixedBufferStream(input);
-    var parser = ProtocolParser.init(allocator, stream.reader().any());
-
-    const commands = try parser.readCommands();
+    const commands = try parseCommands(allocator, stream.reader().any());
     defer commands.deinit();
 
-    try std.testing.expect(commands.items.len == 3);
+    try std.testing.expect(commands.items.len == 2);
 
     // Check first command (open)
-    try std.testing.expect(std.meta.activeTag(commands.items[0]) == .open);
-    try std.testing.expectEqualStrings("token1", commands.items[0].open.token);
+    try std.testing.expectEqualStrings("token1", commands.items[0].token);
 
-    // Check second command (save)
-    try std.testing.expect(std.meta.activeTag(commands.items[1]) == .save);
-    try std.testing.expectEqualStrings("token2", commands.items[1].save.token);
-    try std.testing.expectEqualStrings("hello", commands.items[1].save.data);
-
-    // Check third command (close)
-    try std.testing.expect(std.meta.activeTag(commands.items[2]) == .close);
-    try std.testing.expectEqualStrings("token3", commands.items[2].close.token);
+    // Check second command (open)
+    try std.testing.expectEqualStrings("token2", commands.items[1].token);
 }
 
 test "parse empty command list" {
@@ -415,9 +242,7 @@ test "parse empty command list" {
     const input = ".\n";
 
     var stream = std.io.fixedBufferStream(input);
-    var parser = ProtocolParser.init(allocator, stream.reader().any());
-
-    const commands = try parser.readCommands();
+    const commands = try parseCommands(allocator, stream.reader().any());
     defer commands.deinit();
 
     try std.testing.expect(commands.items.len == 0);
@@ -427,8 +252,7 @@ test "write save command" {
     var buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer buffer.deinit();
 
-    var writer = ProtocolWriter.init(buffer.writer().any());
-    try writer.writeSaveCommand("test123", "file content here");
+    try writeSaveCommand(buffer.writer().any(), "test123", "file content here");
 
     const expected = "save\ntoken: test123\ndata: 17\nfile content here\n";
     try std.testing.expectEqualStrings(expected, buffer.items);
@@ -438,8 +262,7 @@ test "write close command" {
     var buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer buffer.deinit();
 
-    var writer = ProtocolWriter.init(buffer.writer().any());
-    try writer.writeCloseCommand("test456");
+    try writeCloseCommand(buffer.writer().any(), "test456");
 
     const expected = "close\ntoken: test456\n\n";
     try std.testing.expectEqualStrings(expected, buffer.items);
@@ -449,8 +272,7 @@ test "write save command with empty data" {
     var buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer buffer.deinit();
 
-    var writer = ProtocolWriter.init(buffer.writer().any());
-    try writer.writeSaveCommand("empty", "");
+    try writeSaveCommand(buffer.writer().any(), "empty", "");
 
     const expected = "save\ntoken: empty\ndata: 0\n\n";
     try std.testing.expectEqualStrings(expected, buffer.items);
@@ -460,8 +282,7 @@ test "write save command with multiline data" {
     var buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer buffer.deinit();
 
-    var writer = ProtocolWriter.init(buffer.writer().any());
-    try writer.writeSaveCommand("multiline", "line1\nline2\nline3");
+    try writeSaveCommand(buffer.writer().any(), "multiline", "line1\nline2\nline3");
 
     const expected = "save\ntoken: multiline\ndata: 17\nline1\nline2\nline3\n";
     try std.testing.expectEqualStrings(expected, buffer.items);
@@ -485,39 +306,15 @@ test "parse open command with boolean fields" {
     ;
 
     var stream = std.io.fixedBufferStream(input);
-    var parser = ProtocolParser.init(allocator, stream.reader().any());
-
-    const commands = try parser.readCommands();
+    const commands = try parseCommands(allocator, stream.reader().any());
     defer commands.deinit();
 
-    const open_cmd = commands.items[0].open;
+    const open_cmd = commands.items[0];
     try std.testing.expect(open_cmd.data_on_save == false);
     try std.testing.expect(open_cmd.re_activate == true);
 }
 
-test "parse save command with binary data" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    const binary_data = [_]u8{ 0x00, 0x01, 0x02, 0xFF, 0xFE };
-    var input_data = std.ArrayList(u8).init(std.testing.allocator);
-    defer input_data.deinit();
-
-    try input_data.appendSlice("save\ntoken: binary\ndata: 5\n");
-    try input_data.appendSlice(&binary_data);
-    try input_data.appendSlice("\n\n.\n");
-
-    var stream = std.io.fixedBufferStream(input_data.items);
-    var parser = ProtocolParser.init(allocator, stream.reader().any());
-
-    const commands = try parser.readCommands();
-    defer commands.deinit();
-
-    const save_cmd = commands.items[0].save;
-    try std.testing.expectEqualStrings("binary", save_cmd.token);
-    try std.testing.expectEqualSlices(u8, &binary_data, save_cmd.data);
-}
+// removed save/close parse tests; we only parse open commands now
 
 test "ignore unknown command" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -536,12 +333,9 @@ test "ignore unknown command" {
     ;
 
     var stream = std.io.fixedBufferStream(input);
-    var parser = ProtocolParser.init(allocator, stream.reader().any());
-
-    const commands = try parser.readCommands();
+    const commands = try parseCommands(allocator, stream.reader().any());
     defer commands.deinit();
 
     // Should have 1 command (open), unknown command should be ignored
     try std.testing.expect(commands.items.len == 1);
-    try std.testing.expect(std.meta.activeTag(commands.items[0]) == .open);
 }
