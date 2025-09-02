@@ -53,8 +53,6 @@ pub fn main() !void {
         file_manager.cleanupLeftoverHostDirs(allocator, base_dir);
     }
 
-    // Removed SessionManager; pass config and allocator directly
-
     // Setup server (Unix socket or TCP)
     var listener = if (cfg.isUnixSocket()) blk: {
         const socket_path = cfg.socket_path.?;

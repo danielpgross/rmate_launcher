@@ -60,8 +60,9 @@ pub fn handleOpenCommand(allocator: std.mem.Allocator, writer: std.io.AnyWriter,
     }
 
     const temp_path = try file_manager.createTempFile(allocator, config.base_dir, hostname, remote_path);
+    errdefer allocator.free(temp_path);
 
-    // Determine initial content and write once with shared error handling
+    // Write initial content to temp file
     const write_data: []const u8 = if (cmd.data) |d| d else "";
     file_manager.writeTempFile(temp_path, write_data) catch |err| switch (err) {
         error.PathAlreadyExists => {
@@ -76,26 +77,26 @@ pub fn handleOpenCommand(allocator: std.mem.Allocator, writer: std.io.AnyWriter,
         else => return err,
     };
 
-    var watcher_ptr: ?*FileWatcher = null;
-    var watcher_ctx_ptr: ?*FileWatcherContext = null;
+    var watcher: ?*FileWatcher = null;
+    var watcher_ctx: ?*FileWatcherContext = null;
 
     // Start file watcher if data_on_save is true
     if (cmd.data_on_save) {
-        const watcher_ctx = try allocator.create(FileWatcherContext);
-        watcher_ctx.* = .{ .allocator = allocator, .writer = writer, .base_dir = config.base_dir, .token = cmd.token, .temp_path = temp_path };
+        watcher_ctx = try allocator.create(FileWatcherContext);
+        errdefer allocator.destroy(watcher_ctx.?);
+        watcher_ctx.?.* = .{ .allocator = allocator, .writer = writer, .base_dir = config.base_dir, .token = cmd.token, .temp_path = temp_path };
 
-        const watcher = try allocator.create(FileWatcher);
-        watcher.* = try FileWatcher.init(allocator, temp_path, fileChangedCallback, watcher_ctx);
-        try watcher.start();
-
-        watcher_ptr = watcher;
-        watcher_ctx_ptr = watcher_ctx;
+        watcher = try allocator.create(FileWatcher);
+        errdefer allocator.destroy(watcher.?);
+        watcher.?.* = try FileWatcher.init(allocator, temp_path, fileChangedCallback, watcher_ctx.?);
+        try watcher.?.start();
+        errdefer watcher.?.deinit();
     }
 
     // Spawn editor in a separate thread and track lifecycle with wait group
     const editor_cmd = config.getEditor(hostname, remote_path);
     wait_group.start();
-    const thread = Thread.spawn(.{}, editorThread, .{ allocator, writer, config.base_dir, editor_cmd, temp_path, cmd.token, watcher_ptr, watcher_ctx_ptr, wait_group }) catch |err| {
+    const thread = Thread.spawn(.{}, editorThread, .{ allocator, writer, config.base_dir, editor_cmd, temp_path, cmd.token, watcher, watcher_ctx, wait_group }) catch |err| {
         wait_group.finish();
         return err;
     };
@@ -152,6 +153,7 @@ fn editorThread(allocator: std.mem.Allocator, writer: std.io.AnyWriter, base_dir
 
     // Cleanup temp file and any empty parent directories
     file_manager.cleanupTempPath(base_dir, temp_path);
+    allocator.free(temp_path);
 
     log.info("Editor closed for file: {s}", .{token});
     // Signal completion to wait group last
