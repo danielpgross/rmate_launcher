@@ -128,11 +128,8 @@ fn fileChangedCallback(ctx: *anyopaque, path: []const u8) void {
 }
 
 fn editorThread(allocator: std.mem.Allocator, writer: std.io.AnyWriter, base_dir: []const u8, editor_cmd: []const u8, temp_path: []const u8, token: []const u8, watcher: ?*FileWatcher, watcher_ctx: ?*FileWatcherContext, wait_group: *Thread.WaitGroup) !void {
-    // Create editor spawner
-    var spawner = file_manager.EditorSpawner.init(allocator);
-
     // Spawn editor and wait for it to close
-    spawner.spawnEditorBlocking(editor_cmd, temp_path) catch |err| {
+    file_manager.spawnEditorBlocking(allocator, editor_cmd, temp_path) catch |err| {
         log.err("Failed to spawn editor: {}", .{err});
     };
 

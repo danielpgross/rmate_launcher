@@ -205,53 +205,45 @@ pub fn sanitizePath(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     return try out.toOwnedSlice();
 }
 
-pub const EditorSpawner = struct {
-    allocator: std.mem.Allocator,
+pub fn spawnEditorBlocking(allocator: std.mem.Allocator, editor_cmd: []const u8, file_path: []const u8) !void {
+    // Use shell to handle complex editor commands with arguments
+    var args = [_][]const u8{ "/bin/sh", "-c", undefined };
 
-    pub fn init(allocator: std.mem.Allocator) EditorSpawner {
-        return .{ .allocator = allocator };
+    // Build command string: "editor_cmd file_path"
+    const full_cmd = try std.fmt.allocPrint(allocator, "{s} \"{s}\"", .{ editor_cmd, file_path });
+    defer allocator.free(full_cmd);
+
+    args[2] = full_cmd;
+
+    var child = std.process.Child.init(&args, allocator);
+    child.stdin_behavior = .Inherit;
+    child.stdout_behavior = .Inherit;
+    child.stderr_behavior = .Inherit;
+
+    log.debug("Spawning editor: {s}", .{full_cmd});
+    var timer = try std.time.Timer.start();
+    try child.spawn();
+    const result = try child.wait();
+    const elapsed_ms = timer.read() / std.time.ns_per_ms;
+
+    switch (result) {
+        .Exited => |code| {
+            log.debug("Editor exited with code {d} after {d}ms", .{ code, elapsed_ms });
+            if (code != 0) {
+                log.warn("Editor exited with code {d}", .{code});
+            }
+            if (code == 0 and elapsed_ms < 500) {
+                log.warn(
+                    "Editor command returned after {d}ms; this usually means it did not block. Ensure your editor command waits for the file to close (e.g., \"code --wait\"). cmd=\"{s}\", path=\"{s}\"",
+                    .{ elapsed_ms, editor_cmd, file_path },
+                );
+            }
+        },
+        else => {
+            log.warn("Editor terminated abnormally", .{});
+        },
     }
-
-    pub fn spawnEditorBlocking(self: *EditorSpawner, editor_cmd: []const u8, file_path: []const u8) !void {
-        // Use shell to handle complex editor commands with arguments
-        var args = [_][]const u8{ "/bin/sh", "-c", undefined };
-
-        // Build command string: "editor_cmd file_path"
-        const full_cmd = try std.fmt.allocPrint(self.allocator, "{s} \"{s}\"", .{ editor_cmd, file_path });
-        defer self.allocator.free(full_cmd);
-
-        args[2] = full_cmd;
-
-        var child = std.process.Child.init(&args, self.allocator);
-        child.stdin_behavior = .Inherit;
-        child.stdout_behavior = .Inherit;
-        child.stderr_behavior = .Inherit;
-
-        log.debug("Spawning editor: {s}", .{full_cmd});
-        var timer = try std.time.Timer.start();
-        try child.spawn();
-        const result = try child.wait();
-        const elapsed_ms = timer.read() / std.time.ns_per_ms;
-
-        switch (result) {
-            .Exited => |code| {
-                log.debug("Editor exited with code {d} after {d}ms", .{ code, elapsed_ms });
-                if (code != 0) {
-                    log.warn("Editor exited with code {d}", .{code});
-                }
-                if (code == 0 and elapsed_ms < 500) {
-                    log.warn(
-                        "Editor command returned after {d}ms; this usually means it did not block. Ensure your editor command waits for the file to close (e.g., \"code --wait\"). cmd=\"{s}\", path=\"{s}\"",
-                        .{ elapsed_ms, editor_cmd, file_path },
-                    );
-                }
-            },
-            else => {
-                log.warn("Editor terminated abnormally", .{});
-            },
-        }
-    }
-};
+}
 
 // Unit Tests
 const testing = std.testing;
@@ -463,12 +455,6 @@ test "FileManager write and read large file" {
 
     // Cleanup
     std.fs.deleteFileAbsolute(temp_path) catch {};
-}
-
-test "EditorSpawner init" {
-    // Test basic initialization
-    const spawner = EditorSpawner.init(test_allocator);
-    try testing.expect(spawner.allocator.ptr == test_allocator.ptr);
 }
 
 test "FileManager cleanupTempPath deletes file and prunes empty dirs" {
