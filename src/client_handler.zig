@@ -167,9 +167,12 @@ fn createTestConfig(allocator: std.mem.Allocator) !@import("config.zig").Config 
     const ip = try allocator.dupe(u8, "127.0.0.1");
 
     return @import("config.zig").Config{
+        .allocator = allocator,
         .default_editor = editor,
         .port = 52698,
         .ip = ip,
+        .socket_path = null,
+        .base_dir = "/tmp", // tests that don't use base_dir won't free it
     };
 }
 
@@ -316,6 +319,7 @@ test "handleOpenCommand closes duplicate opens by sending close command" {
 
     // Build a Config and writer with the write end of the pipe
     var cfg = @import("config.zig").Config{
+        .allocator = allocator,
         .default_editor = "true",
         .socket_path = null,
         .port = null,

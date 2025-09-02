@@ -43,7 +43,7 @@ pub fn main() !void {
     }
 
     // Load configuration (includes base_dir)
-    var cfg = try @import("config.zig").Config.init();
+    var cfg = try @import("config.zig").Config.init(allocator);
     defer cfg.deinit();
 
     // Ensure base_dir exists and cleanup leftovers
