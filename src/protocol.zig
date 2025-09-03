@@ -10,11 +10,23 @@ pub const OpenCommand = struct {
     selection: ?[]u8 = null,
     file_type: ?[]u8 = null,
     data: ?[]u8 = null,
+
+    pub fn deinit(self: *const OpenCommand, allocator: std.mem.Allocator) void {
+        allocator.free(self.display_name);
+        allocator.free(self.real_path);
+        allocator.free(self.token);
+        if (self.selection) |s| allocator.free(s);
+        if (self.file_type) |s| allocator.free(s);
+        if (self.data) |s| allocator.free(s);
+    }
 };
 
 pub fn parseCommands(allocator: std.mem.Allocator, reader: std.io.AnyReader) !std.ArrayList(OpenCommand) {
     var commands = std.ArrayList(OpenCommand).init(allocator);
-    errdefer commands.deinit();
+    errdefer {
+        for (commands.items) |cmd| cmd.deinit(allocator);
+        commands.deinit();
+    }
 
     log.debug("readCommands: Starting to read commands", .{});
 

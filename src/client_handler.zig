@@ -32,7 +32,10 @@ pub fn handleClient(config: *const Config, allocator: std.mem.Allocator, stream:
 
     const reader = stream.reader().any();
     const commands = try protocol.parseCommands(allocator, reader);
-    defer commands.deinit();
+    defer {
+        for (commands.items) |cmd| cmd.deinit(allocator);
+        commands.deinit();
+    }
     log.debug("handleClient: Read {} commands", .{commands.items.len});
 
     // Process commands
