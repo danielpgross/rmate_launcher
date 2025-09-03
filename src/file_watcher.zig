@@ -148,7 +148,7 @@ pub const FileWatcher = struct {
                 .ident = @intCast(self.os_data.kqueue.file_fd.?),
                 .filter = EVFILT_VNODE,
                 .flags = EV_ADD | EV_ENABLE | EV_CLEAR,
-                .fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB,
+                .fflags = NOTE_WRITE | NOTE_EXTEND,
                 .data = 0,
                 .udata = 0,
             },
@@ -174,7 +174,7 @@ pub const FileWatcher = struct {
                 log.debug("kqueue event received for file: {s}, fflags: 0x{x}", .{ self.path, event.fflags });
 
                 // Check if it's a modification event we care about
-                if ((event.fflags & (NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB)) != 0) {
+                if ((event.fflags & (NOTE_WRITE | NOTE_EXTEND)) != 0) {
                     log.debug("File modified: {s}", .{self.path});
                     self.callback(self.callback_context, self.path);
                 }
@@ -196,7 +196,7 @@ pub const FileWatcher = struct {
         defer self.allocator.free(path_with_null);
         @memcpy(path_with_null[0..self.path.len], self.path);
 
-        const watch_mask = IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE | IN_MOVED_FROM | IN_MOVED_TO | IN_CREATE | IN_DELETE;
+        const watch_mask = IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_FROM | IN_MOVED_TO | IN_CREATE | IN_DELETE;
         self.os_data.inotify.watch_descriptor = try posix.inotify_add_watchZ(self.os_data.inotify.inotify_fd.?, path_with_null, watch_mask);
 
         log.debug("inotify file watcher started for: {s}", .{self.path});
@@ -227,7 +227,7 @@ pub const FileWatcher = struct {
                 log.debug("inotify event received for file: {s}, mask: 0x{x}", .{ self.path, event.mask });
 
                 // Check if it's a modification event we care about
-                if ((event.mask & (IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE | IN_MOVED_FROM | IN_MOVED_TO | IN_CREATE | IN_DELETE)) != 0) {
+                if ((event.mask & (IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_FROM | IN_MOVED_TO | IN_CREATE | IN_DELETE)) != 0) {
                     log.debug("File modified: {s}", .{self.path});
                     self.callback(self.callback_context, self.path);
                 }
