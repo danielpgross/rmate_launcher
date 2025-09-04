@@ -1,12 +1,12 @@
 [Unit]
 Description=RMate Launcher - Remote file editing server
-After=network.target
-Wants=network.target
+After=graphical-session.target
+Wants=graphical-session.target
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/rmate_launcher
-Restart=always
+Restart=on-failure
 RestartSec=5
 
 # Environment variables
@@ -20,16 +20,5 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=rmate_launcher
 
-# Security settings
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=tmpfs
-ReadWritePaths=%h/.rmate_launcher
-ReadOnlyPaths=%h/.config %h/.local
-PrivateDevices=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
