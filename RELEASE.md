@@ -16,7 +16,21 @@ const version = std.SemanticVersion{ .major = 0, .minor = 7, .patch = 0, .pre = 
 const version = std.SemanticVersion{ .major = 1, .minor = 0, .patch = 0 };
 ```
 
-### 2. Commit and push the version update
+### 2. Update `build.zig.zon` version to match
+
+Edit `build.zig.zon` and set `.version` to the same version string as in `build.zig` (e.g., `"1.0.0"` or `"1.0.0-dev"`).
+
+```
+// Before release
+.version = "0.7.0-dev",
+
+// For v1.0.0 release
+.version = "1.0.0",
+```
+
+This keeps package metadata consistent with the compiled-in version.
+
+### 3. Commit and push the version update
 
 ```bash
 git add build.zig
@@ -24,21 +38,21 @@ git commit -m "Release v1.0.0"
 git push origin main
 ```
 
-### 3. Create and push git tag
+### 4. Create and push git tag
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-### 4. Create GitHub release
+### 5. Create GitHub release
 
 - Go to GitHub → Releases → "Create a new release"
 - Choose your tag (v1.0.0)
 - Add release notes
 - Click "Publish release"
 
-### 5. GitHub Actions automatically handles the rest
+### 6. GitHub Actions automatically handles the rest
 
 The release workflow will:
 - Build binaries for all platforms (Linux x86_64/ARM64, macOS x86_64/ARM64)
@@ -46,7 +60,7 @@ The release workflow will:
 - Generate SHA256 checksums for security verification
 - Upload all artifacts to the GitHub release
 
-### 6. Bump to next dev version
+### 7. Bump to next dev version
 
 After the release, update `build.zig` for the next development cycle:
 
