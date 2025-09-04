@@ -136,7 +136,6 @@ mkdir -p ~/.rmate_launcher ~/.config/systemd/user
 cp linux-systemd.service.example ~/.config/systemd/user/rmate_launcher.service
 # Edit service: paths, RMATE_EDITOR, RMATE_SOCKET
 systemctl --user daemon-reload && systemctl --user enable --now rmate_launcher
-sudo loginctl enable-linger $USER  # Start on boot (optional)
 ```
 
 ## Configuration

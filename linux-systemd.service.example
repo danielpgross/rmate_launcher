@@ -1,7 +1,6 @@
 [Unit]
 Description=RMate Launcher - Remote file editing server
 After=graphical-session.target
-Wants=graphical-session.target
 
 [Service]
 Type=simple
