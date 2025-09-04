@@ -2,7 +2,7 @@
   <img src="logo.png" alt="RMate Launcher Logo" width="200"/>
   
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-  [![Version](https://img.shields.io/badge/Version-0.7.0--dev-blue.svg)](https://github.com/danielpgross/rmate-server/releases)
+  [![Version](https://img.shields.io/badge/Version-0.7.0-blue.svg)](https://github.com/danielpgross/rmate-server/releases)
   [![Zig](https://img.shields.io/badge/Zig-0.15.1+-ff6600.svg?logo=zig&logoColor=white)](https://ziglang.org/)
   [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/danielpgross/rmate-server)
 </div>
