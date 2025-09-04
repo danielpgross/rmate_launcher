@@ -15,7 +15,7 @@ const log = std.log.scoped(.rmate_launcher);
 
 var shutdown_requested: atomic.Value(bool) = atomic.Value(bool).init(false);
 
-fn handleSignal(sig: c_int) callconv(.C) void {
+fn handleSignal(sig: c_int) callconv(.c) void {
     _ = sig;
     shutdown_requested.store(true, .release);
 }
@@ -35,7 +35,7 @@ pub fn main() !void {
     {
         var sa = posix.Sigaction{
             .handler = .{ .handler = handleSignal },
-            .mask = posix.empty_sigset,
+            .mask = posix.sigemptyset(),
             .flags = 0,
         };
         posix.sigaction(posix.SIG.INT, &sa, null);
@@ -80,7 +80,7 @@ pub fn main() !void {
             log.warn("Failed to set permissions 0600 on socket {s}: {}", .{ socket_path, chmod_err });
         };
 
-        log.info("RMate Launcher {} listening on Unix socket: {s}", .{ build_options.version, socket_path });
+        log.info("RMate Launcher {f} listening on Unix socket: {s}", .{ build_options.version, socket_path });
         break :blk unix_listener;
     } else blk: {
         const ip = cfg.ip.?;
@@ -91,7 +91,7 @@ pub fn main() !void {
             .kernel_backlog = 128,
         });
 
-        log.info("RMate Launcher {} listening on TCP: {s}:{}", .{ build_options.version, ip, port });
+        log.info("RMate Launcher {f} listening on TCP: {s}:{d}", .{ build_options.version, ip, port });
         break :blk tcp_listener;
     };
     defer listener.deinit();
@@ -110,10 +110,10 @@ pub fn main() !void {
     // so signals interrupt the blocking accept and allow graceful shutdown.
     while (true) {
         if (net_utils.acceptInterruptible(&listener)) |connection| {
-            log.info("Client connected from {}", .{connection.address});
+            log.info("Client connected from {f}", .{connection.address});
 
             // Send greeting
-            const version_string = try std.fmt.allocPrint(std.heap.page_allocator, "RMate Launcher {}\n", .{build_options.version});
+            const version_string = try std.fmt.allocPrint(std.heap.page_allocator, "RMate Launcher {f}\n", .{build_options.version});
             defer std.heap.page_allocator.free(version_string);
             try connection.stream.writeAll(version_string);
 

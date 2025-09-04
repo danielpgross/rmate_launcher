@@ -24,7 +24,7 @@ pub const Config = struct {
             if (std.process.getEnvVarOwned(allocator, "RMATE_PORT")) |port_str| {
                 defer allocator.free(port_str);
                 break :blk std.fmt.parseUnsigned(u16, port_str, 10) catch |err| {
-                    log.warn("Invalid RMATE_PORT value '{s}', using default port 52698. Error: {}", .{ port_str, err });
+                    log.warn("Invalid RMATE_PORT value '{s}', using default port 52698. Error: {any}", .{ port_str, err });
                     break :blk 52698;
                 };
             } else |err| switch (err) {
@@ -69,7 +69,7 @@ pub const Config = struct {
         if (socket_path) |path| {
             log.info("Using Unix socket: {s}", .{path});
         } else {
-            log.info("Using TCP socket: {s}:{}", .{ ip.?, port });
+            log.info("Using TCP socket: {s}:{d}", .{ ip.?, port });
         }
 
         // Determine base directory for temp files

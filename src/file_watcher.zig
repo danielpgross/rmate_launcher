@@ -164,7 +164,7 @@ pub const FileWatcher = struct {
             const timeout = posix.timespec{ .sec = 0, .nsec = 100 * std.time.ns_per_ms }; // 100ms timeout
 
             const num_events = posix.kevent(self.os_data.kqueue.kq.?, &[0]posix.Kevent{}, &eventlist, &timeout) catch |err| {
-                log.err("kevent error: {}", .{err});
+                log.err("kevent error: {any}", .{err});
                 return err;
             };
 
@@ -207,11 +207,11 @@ pub const FileWatcher = struct {
             const bytes_read = posix.read(self.os_data.inotify.inotify_fd.?, &buffer) catch |err| switch (err) {
                 error.WouldBlock => {
                     // No events available, sleep briefly and continue
-                    std.time.sleep(100 * std.time.ns_per_ms); // 100ms
+                    std.Thread.sleep(100 * std.time.ns_per_ms); // 100ms
                     continue;
                 },
                 else => {
-                    log.err("inotify read error: {}", .{err});
+                    log.err("inotify read error: {any}", .{err});
                     return err;
                 },
             };
@@ -249,12 +249,12 @@ const expectEqualStrings = testing.expectEqualStrings;
 
 // Test context for callback verification
 const TestContext = struct {
-    calls: std.ArrayList([]const u8),
+    calls: std.array_list.AlignedManaged([]const u8, null),
     allocator: std.mem.Allocator,
 
     fn init(allocator: std.mem.Allocator) TestContext {
         return TestContext{
-            .calls = std.ArrayList([]const u8).init(allocator),
+            .calls = std.array_list.AlignedManaged([]const u8, null).init(allocator),
             .allocator = allocator,
         };
     }
@@ -269,7 +269,7 @@ const TestContext = struct {
     fn callback(ctx: *anyopaque, path: []const u8) void {
         const self: *TestContext = @ptrCast(@alignCast(ctx));
         const path_copy = self.allocator.dupe(u8, path) catch return;
-        self.calls.append(path_copy) catch return;
+        self.calls.append(self.allocator, path_copy) catch return;
     }
 };
 

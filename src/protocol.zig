@@ -21,8 +21,8 @@ pub const OpenCommand = struct {
     }
 };
 
-pub fn parseCommands(allocator: std.mem.Allocator, reader: std.io.AnyReader) !std.ArrayList(OpenCommand) {
-    var commands = std.ArrayList(OpenCommand).init(allocator);
+pub fn parseCommands(allocator: std.mem.Allocator, reader: *std.Io.Reader) !std.array_list.AlignedManaged(OpenCommand, null) {
+    var commands = std.array_list.AlignedManaged(OpenCommand, null).init(allocator);
     errdefer {
         for (commands.items) |cmd| cmd.deinit(allocator);
         commands.deinit();
@@ -31,8 +31,10 @@ pub fn parseCommands(allocator: std.mem.Allocator, reader: std.io.AnyReader) !st
     log.debug("readCommands: Starting to read commands", .{});
 
     while (true) {
-        const line = try readLine(allocator, reader);
-        defer allocator.free(line);
+        const line = reader.takeDelimiterExclusive('\n') catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
 
         log.debug("readCommands: Read line: '{s}'", .{line});
 
@@ -51,24 +53,11 @@ pub fn parseCommands(allocator: std.mem.Allocator, reader: std.io.AnyReader) !st
         // Silently ignore empty lines
     }
 
-    log.debug("readCommands: Finished reading {} commands", .{commands.items.len});
+    log.debug("readCommands: Finished reading {d} commands", .{commands.items.len});
     return commands;
 }
 
-fn readLine(allocator: std.mem.Allocator, reader: std.io.AnyReader) ![]u8 {
-    var buf = std.ArrayList(u8).init(allocator);
-    errdefer buf.deinit();
-
-    while (true) {
-        const byte = try reader.readByte();
-        if (byte == '\n') break;
-        try buf.append(byte);
-    }
-
-    return try buf.toOwnedSlice();
-}
-
-fn parseOpenCommand(allocator: std.mem.Allocator, reader: std.io.AnyReader) !OpenCommand {
+fn parseOpenCommand(allocator: std.mem.Allocator, reader: *std.Io.Reader) !OpenCommand {
     var cmd = OpenCommand{
         .display_name = undefined,
         .real_path = undefined,
@@ -78,8 +67,7 @@ fn parseOpenCommand(allocator: std.mem.Allocator, reader: std.io.AnyReader) !Ope
     log.debug("parseOpenCommand: Starting to parse open command", .{});
 
     while (true) {
-        const line = try readLine(allocator, reader);
-        defer allocator.free(line);
+        const line = try reader.takeDelimiterExclusive('\n');
 
         log.debug("parseOpenCommand: Read line: '{s}'", .{line});
 
@@ -110,9 +98,9 @@ fn parseOpenCommand(allocator: std.mem.Allocator, reader: std.io.AnyReader) !Ope
                 cmd.file_type = try allocator.dupe(u8, value);
             } else if (std.mem.eql(u8, key, "data")) {
                 const size = try std.fmt.parseInt(usize, value, 10);
-                log.debug("parseOpenCommand: Reading {} bytes of data", .{size});
+                log.debug("parseOpenCommand: Reading {d} bytes of data", .{size});
                 cmd.data = try allocator.alloc(u8, size);
-                _ = try reader.readAll(cmd.data.?);
+                try reader.readSliceAll(cmd.data.?);
                 break;
             }
         }
@@ -122,7 +110,7 @@ fn parseOpenCommand(allocator: std.mem.Allocator, reader: std.io.AnyReader) !Ope
     return cmd;
 }
 
-pub fn writeSaveCommand(writer: std.io.AnyWriter, token: []const u8, data: []const u8) !void {
+pub fn writeSaveCommand(writer: *std.Io.Writer, token: []const u8, data: []const u8) !void {
     log.debug("writeSaveCommand: Writing save command for token: {s}, data length: {d}", .{ token, data.len });
     log.debug("writeSaveCommand: File content: '{s}'", .{data});
 
@@ -135,7 +123,7 @@ pub fn writeSaveCommand(writer: std.io.AnyWriter, token: []const u8, data: []con
     log.debug("writeSaveCommand: Complete command sent", .{});
 }
 
-pub fn writeCloseCommand(writer: std.io.AnyWriter, token: []const u8) !void {
+pub fn writeCloseCommand(writer: *std.Io.Writer, token: []const u8) !void {
     try writer.writeAll("close\n");
     try writer.print("token: {s}\n", .{token});
     try writer.writeAll("\n");
@@ -157,8 +145,8 @@ test "parse basic open command" {
         \\
     ;
 
-    var stream = std.io.fixedBufferStream(input);
-    const commands = try parseCommands(allocator, stream.reader().any());
+    var r = std.Io.Reader.fixed(input);
+    const commands = try parseCommands(allocator, &r);
     defer commands.deinit();
 
     try std.testing.expect(commands.items.len == 1);
@@ -181,23 +169,25 @@ test "parse open command with all fields" {
 
     // Build input with proper data section format
     const data_content = "{\"test\": \"file content\"}";
-    var input_data = std.ArrayList(u8).init(std.testing.allocator);
+    var input_data = std.array_list.AlignedManaged(u8, null).init(std.testing.allocator);
     defer input_data.deinit();
 
-    try input_data.appendSlice("open\n");
-    try input_data.appendSlice("display-name: config.json\n");
-    try input_data.appendSlice("real-path: /etc/config.json\n");
-    try input_data.appendSlice("data-on-save: yes\n");
-    try input_data.appendSlice("re-activate: yes\n");
-    try input_data.appendSlice("token: xyz789\n");
-    try input_data.appendSlice("selection: 1:5-2:10\n");
-    try input_data.appendSlice("file-type: json\n");
-    try std.fmt.format(input_data.writer(), "data: {d}\n", .{data_content.len});
-    try input_data.appendSlice(data_content);
-    try input_data.appendSlice("\n.\n");
+    try input_data.appendSlice(std.testing.allocator, "open\n");
+    try input_data.appendSlice(std.testing.allocator, "display-name: config.json\n");
+    try input_data.appendSlice(std.testing.allocator, "real-path: /etc/config.json\n");
+    try input_data.appendSlice(std.testing.allocator, "data-on-save: yes\n");
+    try input_data.appendSlice(std.testing.allocator, "re-activate: yes\n");
+    try input_data.appendSlice(std.testing.allocator, "token: xyz789\n");
+    try input_data.appendSlice(std.testing.allocator, "selection: 1:5-2:10\n");
+    try input_data.appendSlice(std.testing.allocator, "file-type: json\n");
+    const header = try std.fmt.allocPrint(std.testing.allocator, "data: {d}\n", .{data_content.len});
+    defer std.testing.allocator.free(header);
+    try input_data.appendSlice(header);
+    try input_data.appendSlice(std.testing.allocator, data_content);
+    try input_data.appendSlice(std.testing.allocator, "\n.\n");
 
-    var stream = std.io.fixedBufferStream(input_data.items);
-    const commands = try parseCommands(allocator, stream.reader().any());
+    var r = std.Io.Reader.fixed(input_data.items);
+    const commands = try parseCommands(allocator, &r);
     defer commands.deinit();
 
     try std.testing.expect(commands.items.len == 1);
@@ -233,8 +223,8 @@ test "parse multiple commands" {
         \\
     ;
 
-    var stream = std.io.fixedBufferStream(input);
-    const commands = try parseCommands(allocator, stream.reader().any());
+    var r = std.Io.Reader.fixed(input);
+    const commands = try parseCommands(allocator, &r);
     defer commands.deinit();
 
     try std.testing.expect(commands.items.len == 2);
@@ -261,43 +251,43 @@ test "parse empty command list" {
 }
 
 test "write save command" {
-    var buffer = std.ArrayList(u8).init(std.testing.allocator);
-    defer buffer.deinit();
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
 
-    try writeSaveCommand(buffer.writer().any(), "test123", "file content here");
+    try writeSaveCommand(&aw.writer, "test123", "file content here");
 
     const expected = "save\ntoken: test123\ndata: 17\nfile content here\n";
-    try std.testing.expectEqualStrings(expected, buffer.items);
+    try std.testing.expectEqualStrings(expected, aw.writer.buffered());
 }
 
 test "write close command" {
-    var buffer = std.ArrayList(u8).init(std.testing.allocator);
-    defer buffer.deinit();
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
 
-    try writeCloseCommand(buffer.writer().any(), "test456");
+    try writeCloseCommand(&aw.writer, "test456");
 
     const expected = "close\ntoken: test456\n\n";
-    try std.testing.expectEqualStrings(expected, buffer.items);
+    try std.testing.expectEqualStrings(expected, aw.writer.buffered());
 }
 
 test "write save command with empty data" {
-    var buffer = std.ArrayList(u8).init(std.testing.allocator);
-    defer buffer.deinit();
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
 
-    try writeSaveCommand(buffer.writer().any(), "empty", "");
+    try writeSaveCommand(&aw.writer, "empty", "");
 
     const expected = "save\ntoken: empty\ndata: 0\n\n";
-    try std.testing.expectEqualStrings(expected, buffer.items);
+    try std.testing.expectEqualStrings(expected, aw.writer.buffered());
 }
 
 test "write save command with multiline data" {
-    var buffer = std.ArrayList(u8).init(std.testing.allocator);
-    defer buffer.deinit();
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
 
-    try writeSaveCommand(buffer.writer().any(), "multiline", "line1\nline2\nline3");
+    try writeSaveCommand(&aw.writer, "multiline", "line1\nline2\nline3");
 
     const expected = "save\ntoken: multiline\ndata: 17\nline1\nline2\nline3\n";
-    try std.testing.expectEqualStrings(expected, buffer.items);
+    try std.testing.expectEqualStrings(expected, aw.writer.buffered());
 }
 
 test "parse open command with boolean fields" {
@@ -317,8 +307,8 @@ test "parse open command with boolean fields" {
         \\
     ;
 
-    var stream = std.io.fixedBufferStream(input);
-    const commands = try parseCommands(allocator, stream.reader().any());
+    var r = std.Io.Reader.fixed(input);
+    const commands = try parseCommands(allocator, &r);
     defer commands.deinit();
 
     const open_cmd = commands.items[0];
@@ -344,8 +334,8 @@ test "ignore unknown command" {
         \\
     ;
 
-    var stream = std.io.fixedBufferStream(input);
-    const commands = try parseCommands(allocator, stream.reader().any());
+    var r = std.Io.Reader.fixed(input);
+    const commands = try parseCommands(allocator, &r);
     defer commands.deinit();
 
     // Should have 1 command (open), unknown command should be ignored

@@ -11,7 +11,7 @@ const log = std.log.scoped(.rmate_client);
 
 const FileWatcherContext = struct {
     allocator: std.mem.Allocator,
-    writer: std.io.AnyWriter,
+    writer: *std.Io.Writer,
     base_dir: []const u8,
     token: []const u8,
     temp_path: []const u8,
@@ -30,18 +30,23 @@ pub fn handleClient(config: *const Config, allocator: std.mem.Allocator, stream:
 
     var wait_group: std.Thread.WaitGroup = .{};
 
-    const reader = stream.reader().any();
+    var read_buffer: [4096]u8 = undefined;
+    var reader_impl = stream.reader(&read_buffer);
+    const reader = reader_impl.interface();
     const commands = try protocol.parseCommands(allocator, reader);
     defer {
         for (commands.items) |cmd| cmd.deinit(allocator);
         commands.deinit();
     }
-    log.debug("handleClient: Read {} commands", .{commands.items.len});
+    log.debug("handleClient: Read {d} commands", .{commands.items.len});
 
     // Process commands
     for (commands.items, 0..) |cmd, i| {
-        log.debug("handleClient: Processing open command {} of {} for file: {s}", .{ i + 1, commands.items.len, cmd.display_name });
-        try handleOpenCommand(allocator, stream.writer().any(), config, cmd, &wait_group);
+        log.debug("handleClient: Processing open command {d} of {d} for file: {s}", .{ i + 1, commands.items.len, cmd.display_name });
+        var write_buffer: [4096]u8 = undefined;
+        var writer_impl = stream.writer(&write_buffer);
+        const writer = &writer_impl.interface;
+        try handleOpenCommand(allocator, writer, config, cmd, &wait_group);
     }
 
     log.debug("handleClient: All commands processed, waiting for files to close", .{});
@@ -50,7 +55,7 @@ pub fn handleClient(config: *const Config, allocator: std.mem.Allocator, stream:
     log.debug("handleClient: All files closed, client handler exiting", .{});
 }
 
-pub fn handleOpenCommand(allocator: std.mem.Allocator, writer: std.io.AnyWriter, config: *const Config, cmd: protocol.OpenCommand, wait_group: *Thread.WaitGroup) !void {
+pub fn handleOpenCommand(allocator: std.mem.Allocator, writer: *std.Io.Writer, config: *const Config, cmd: protocol.OpenCommand, wait_group: *Thread.WaitGroup) !void {
     log.info("Opening file: {s}", .{cmd.display_name});
 
     // Extract hostname from display_name (format: hostname:...)
@@ -114,12 +119,12 @@ fn fileChangedCallback(ctx: *anyopaque, path: []const u8) void {
 
     // Read the file contents
     const contents = file_manager.readTempFile(watcher_ctx.allocator, watcher_ctx.temp_path) catch |err| {
-        log.err("Failed to read changed file: {}", .{err});
+        log.err("Failed to read changed file: {any}", .{err});
         return;
     };
     defer watcher_ctx.allocator.free(contents);
 
-    log.debug("fileChangedCallback: Read {} bytes from file", .{contents.len});
+    log.debug("fileChangedCallback: Read {d} bytes from file", .{contents.len});
     log.debug("fileChangedCallback: Sending save command for token: {s}", .{watcher_ctx.token});
 
     // Send save command to client
@@ -131,7 +136,7 @@ fn fileChangedCallback(ctx: *anyopaque, path: []const u8) void {
     log.debug("fileChangedCallback: Save command sent successfully", .{});
 }
 
-fn editorThread(allocator: std.mem.Allocator, writer: std.io.AnyWriter, base_dir: []const u8, editor_cmd: []const u8, temp_path: []const u8, token: []const u8, watcher: ?*FileWatcher, watcher_ctx: ?*FileWatcherContext, wait_group: *Thread.WaitGroup) !void {
+fn editorThread(allocator: std.mem.Allocator, writer: *std.Io.Writer, base_dir: []const u8, editor_cmd: []const u8, temp_path: []const u8, token: []const u8, watcher: ?*FileWatcher, watcher_ctx: ?*FileWatcherContext, wait_group: *Thread.WaitGroup) !void {
     // Spawn editor and wait for it to close
     file_manager.spawnEditorBlocking(allocator, editor_cmd, temp_path) catch |err| {
         log.err("Failed to spawn editor: {}", .{err});
@@ -360,7 +365,7 @@ test "handleOpenCommand closes duplicate opens by sending close command" {
     posix.close(fds[1]);
 
     // Read from the pipe
-    var out = std.ArrayList(u8).init(allocator);
+    var out = std.array_list.AlignedManaged(u8, null).init(allocator);
     defer out.deinit();
     var buf: [256]u8 = undefined;
     while (true) {
@@ -368,7 +373,7 @@ test "handleOpenCommand closes duplicate opens by sending close command" {
             else => return err,
         };
         if (n == 0) break;
-        try out.appendSlice(buf[0..n]);
+        try out.appendSlice(allocator, buf[0..n]);
         if (n < buf.len) break;
     }
 

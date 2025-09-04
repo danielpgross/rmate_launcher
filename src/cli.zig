@@ -2,10 +2,13 @@ const std = @import("std");
 const build_options = @import("build_options");
 
 pub fn printHelp() !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
 
-    try stdout.print("RMate Launcher {}\n", .{build_options.version});
+    try stdout.print("RMate Launcher {f}\n", .{build_options.version});
     try stdout.writeAll(@embedFile("help.txt"));
+    try stdout.flush();
 }
 
 pub fn parseArgs(allocator: std.mem.Allocator) !bool {

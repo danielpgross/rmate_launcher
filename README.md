@@ -3,7 +3,7 @@
   
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
   [![Version](https://img.shields.io/badge/Version-0.7.0--dev-blue.svg)](https://github.com/danielpgross/rmate-server/releases)
-  [![Zig](https://img.shields.io/badge/Zig-0.14.1+-ff6600.svg?logo=zig&logoColor=white)](https://ziglang.org/)
+  [![Zig](https://img.shields.io/badge/Zig-0.15.1+-ff6600.svg?logo=zig&logoColor=white)](https://ziglang.org/)
   [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/danielpgross/rmate-server)
 </div>
 
@@ -109,7 +109,7 @@ mv rmate_launcher-linux-x86_64 /usr/local/bin/rmate_launcher
 
 ### From Source
 
-Requires [Zig](https://ziglang.org/) 0.14.1+:
+Requires [Zig](https://ziglang.org/) 0.15.1+:
 ```bash
 git clone https://github.com/danielpgross/rmate_launcher.git && cd rmate_launcher
 zig build -Doptimize=ReleaseSafe  # or just 'zig build' for development
@@ -179,7 +179,7 @@ export RMATE_EDITOR="$HOME/.rmate_launcher/editor-selector.sh"
 
 ## Development
 
-**Prerequisites:** [Zig](https://ziglang.org/) 0.14.1+
+**Prerequisites:** [Zig](https://ziglang.org/) 0.15.1+
 
 ```bash
 zig build                                                   # Development build

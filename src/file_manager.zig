@@ -12,7 +12,7 @@ pub fn initBaseDir(allocator: std.mem.Allocator, base_dir: []const u8) ![]u8 {
     };
 
     posix.fchmodat(posix.AT.FDCWD, base_path, 0o700, 0) catch |chmod_err| {
-        log.warn("Failed to set permissions 0700 on {s}: {}", .{ base_path, chmod_err });
+        log.warn("Failed to set permissions 0700 on {s}: {any}", .{ base_path, chmod_err });
     };
 
     return try allocator.dupe(u8, base_path);
@@ -46,15 +46,21 @@ pub fn createTempFile(allocator: std.mem.Allocator, base_dir: []const u8, hostna
 pub fn writeTempFile(path: []const u8, data: []const u8) !void {
     const file = try fs.createFileAbsolute(path, .{ .exclusive = true });
     defer file.close();
-    try file.writeAll(data);
+    var buffer: [4096]u8 = undefined;
+    var writer_impl = file.writer(&buffer);
+    const w = &writer_impl.interface;
+    try w.writeAll(data);
+    try w.flush();
 }
 
 pub fn readTempFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const file = try fs.openFileAbsolute(path, .{});
     defer file.close();
-    const stat = try file.stat();
-    const contents = try allocator.alloc(u8, stat.size);
-    _ = try file.read(contents);
+    var reader = file.reader(&.{});
+    var fr = &reader.interface;
+    const size = (try file.stat()).size;
+    const contents = try allocator.alloc(u8, size);
+    try fr.readSliceAll(contents);
     return contents;
 }
 
@@ -69,7 +75,7 @@ pub fn cleanupTempPath(base_dir: []const u8, temp_path: []const u8) void {
 
     std.fs.deleteFileAbsolute(temp_path) catch |err| switch (err) {
         error.FileNotFound => {},
-        else => log.warn("Failed to delete temp file {s}: {}", .{ temp_path, err }),
+        else => log.warn("Failed to delete temp file {s}: {any}", .{ temp_path, err }),
     };
 
     var parent_opt = std.fs.path.dirname(temp_path);
@@ -89,7 +95,7 @@ pub fn cleanupTempPath(base_dir: []const u8, temp_path: []const u8) void {
 
 pub fn cleanupLeftoverHostDirs(allocator: std.mem.Allocator, base_dir: []const u8) void {
     var base_dir_handle = fs.openDirAbsolute(base_dir, .{ .iterate = true }) catch |err| {
-        log.warn("Unable to open temp base directory: {s}: {}", .{ base_dir, err });
+        log.warn("Unable to open temp base directory: {s}: {any}", .{ base_dir, err });
         return;
     };
     defer base_dir_handle.close();
@@ -101,7 +107,7 @@ pub fn cleanupLeftoverHostDirs(allocator: std.mem.Allocator, base_dir: []const u
     var it = base_dir_handle.iterate();
     while (true) {
         const maybe_entry = it.next() catch |err| {
-            log.warn("Error iterating temp base directory {s}: {}", .{ base_dir, err });
+            log.warn("Error iterating temp base directory {s}: {any}", .{ base_dir, err });
             break;
         };
         if (maybe_entry == null) break;
@@ -125,7 +131,7 @@ pub fn cleanupLeftoverHostDirs(allocator: std.mem.Allocator, base_dir: []const u
 
         log.warn("Quarantining leftover temp folder: {s}/{s} -> {s}/{s}", .{ base_dir, entry.name, base_dir, new_rel });
         base_dir_handle.rename(entry.name, new_rel) catch |ren_err| {
-            log.warn("Failed to quarantine {s}/{s}: {}", .{ base_dir, entry.name, ren_err });
+            log.warn("Failed to quarantine {s}/{s}: {any}", .{ base_dir, entry.name, ren_err });
         };
     }
 }
@@ -134,7 +140,7 @@ fn ensureRecoveredSubdir(allocator: std.mem.Allocator, base_dir: []const u8, bas
     base_dir_handle.makePath("_recovered") catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => {
-            log.warn("Failed to create recovered directory {s}/_recovered: {}", .{ base_dir, err });
+            log.warn("Failed to create recovered directory {s}/_recovered: {any}", .{ base_dir, err });
             return null;
         },
     };
@@ -166,7 +172,7 @@ fn ensureRecoveredSubdir(allocator: std.mem.Allocator, base_dir: []const u8, bas
     base_dir_handle.makePath(recovered_ts_rel) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => {
-            log.warn("Failed to create recovered timestamp directory {s}/{s}: {}", .{ base_dir, recovered_ts_rel, err });
+            log.warn("Failed to create recovered timestamp directory {s}/{s}: {any}", .{ base_dir, recovered_ts_rel, err });
             allocator.free(recovered_ts_rel);
             return null;
         },
@@ -188,7 +194,7 @@ pub fn sanitizeHostname(allocator: std.mem.Allocator, hostname: []const u8) ![]u
 }
 
 pub fn sanitizePath(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(allocator);
+    var out = std.array_list.AlignedManaged(u8, null).init(allocator);
     defer out.deinit();
 
     var it = std.mem.splitScalar(u8, path, '/');
